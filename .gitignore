@@ -4,3 +4,4 @@ db/cards.db
 db/*.bak.*
 bills/
 reports/
+.env
