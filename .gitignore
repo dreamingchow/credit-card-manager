@@ -1,8 +1,6 @@
-.env
 __pycache__/
 *.pyc
-bills/*.html
-bills/*.pdf
+db/cards.db
+db/*.bak.*
+bills/
 reports/
-logs/
-.db-journal
