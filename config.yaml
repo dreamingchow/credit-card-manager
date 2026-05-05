@@ -1,0 +1,27 @@
+# 信用卡管理系统配置（不含敏感信息）
+email:
+  imap_host: imap.sina.com
+  imap_port: 993
+  username: dreamingchow@sina.com
+  folder: INBOX
+
+# 邮件过滤
+filters:
+  subjects:
+    - "电子账单"
+    - "对账单"
+    - "信用卡账单"
+  exclude_subjects:
+    - "礼品"
+    - "优惠"
+    - "活动"
+    - "Promotion"
+    - "Deals"
+
+# 还款提醒
+reminder:
+  days_before: [1, 0]  # 提前几天提醒（前一天 + 当天）
+
+# 分析报表
+report:
+  months_to_keep: 12  # 保留多少个月的账单数据

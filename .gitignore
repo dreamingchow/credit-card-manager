@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+bills/*.html
+bills/*.pdf
+reports/
+logs/
+.db-journal
