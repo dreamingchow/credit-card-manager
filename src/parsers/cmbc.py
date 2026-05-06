@@ -20,7 +20,7 @@ class CMBCParser(BillParser):
         m = re.search(r'本期应还款金额\s+New[\s\xa0]+Balance\s+RMB\s+([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val and self._safe_amount(val):
+            if val is not None:
                 result['total_amount'] = val
 
         # 2. 表格格式: "本期应还款金额 New Balance 本期最低还款金额 Min.Payment\nRMB/USD Account RMB 100.02 RMB 100.00"
@@ -31,14 +31,14 @@ class CMBCParser(BillParser):
             )
             if m:
                 val = self._safe_float(m.group(1))
-                if val and self._safe_amount(val):
+                if val is not None:
                     result['total_amount'] = val
 
         # 3. 最低还款金额
         m = re.search(r'本期最低还款金额\s+Min\.Payment\s+RMB\s+([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val and self._safe_amount(val):
+            if val is not None:
                 result['min_payment'] = val
 
         # 4. 到期还款日 (YYYY/MM/DD)

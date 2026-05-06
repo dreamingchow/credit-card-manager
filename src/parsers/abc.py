@@ -27,7 +27,7 @@ class ABCParser(BillParser):
         m = re.search(r'最低还款额\s*\(欠款为-\)\s+Min Payment\s+人民币\s*\(CNY\)\s+([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val and self._safe_amount(val):
+            if val is not None:
                 result['min_payment'] = val
 
         # 3. 到期还款日 (YYYY/MM/DD)

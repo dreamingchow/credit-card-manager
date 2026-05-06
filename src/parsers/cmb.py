@@ -19,14 +19,14 @@ class CMBParser(BillParser):
         m = re.search(r'本期应还金额\s+New\s+Balance\s*[￥¥]\s*([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val and self._safe_amount(val):
+            if val is not None:
                 result['total_amount'] = val
 
         # 2. 最低还款额
         m = re.search(r'最低还款额\s+Min\.?\s*Payment\s*[￥¥]\s*([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val and self._safe_amount(val):
+            if val is not None:
                 result['min_payment'] = val
 
         # 3. 最后还款日 (MM月DD日格式)

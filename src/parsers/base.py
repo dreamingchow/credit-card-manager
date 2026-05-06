@@ -56,8 +56,3 @@ class BillParser(ABC):
                 return f"{year}-{mo:02d}-{d:02d}", d
 
         return None, None
-
-    @staticmethod
-    def _safe_amount(val: float) -> bool:
-        """判断金额是否在合理范围内。"""
-        return 5 <= val <= 100000

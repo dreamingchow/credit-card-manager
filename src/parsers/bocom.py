@@ -19,14 +19,14 @@ class BOCOMParser(BillParser):
         m = re.search(r'本期应还款\s*[￥¥]\s*([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val and self._safe_amount(val):
+            if val is not None:
                 result['total_amount'] = val
 
         # 2. 最低应还款 ￥XXX
         m = re.search(r'最低应还款\s*[￥¥]\s*([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val and self._safe_amount(val):
+            if val is not None:
                 result['min_payment'] = val
 
         # 3. 到期还款日 (交行格式: "2026-06-01")
