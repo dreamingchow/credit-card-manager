@@ -640,9 +640,9 @@ def _clean_holder_name(name):
     # 石* -> 石磊
     if re.match(r'^石\*+$', name):
         return '石磊'
-    # 周** (浦发卡，无法确定全名) -> 周*
+    # 周** (浦发卡) -> 周君明 (全局数据推断)
     if re.match(r'^周\*\*+$', name):
-        return '周*'
+        return '周君明'
     
     return name
 
