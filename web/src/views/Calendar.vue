@@ -29,10 +29,12 @@
         <el-table-column prop="amount" label="金额" width="140" sortable>
           <template #default="{ row }">¥{{ format(row.amount) }}</template>
         </el-table-column>
-        <el-table-column prop="days_until" label="倒计时" width="100">
+        <el-table-column prop="days_until" label="状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.days_until === 0 ? 'danger' : row.days_until <= 3 ? 'warning' : 'success'" size="small">
-              {{ row.days_until === 0 ? '今天' : row.days_until + '天后' }}
+            <el-tag :type="row.is_overdue ? 'danger' : row.days_until === 0 ? 'danger' : row.days_until <= 3 ? 'warning' : 'success'" size="small">
+              <span v-if="row.is_overdue">逾期 {{ Math.abs(row.days_until) }}天</span>
+              <span v-else-if="row.days_until === 0">今天</span>
+              <span v-else>{{ row.days_until }}天后</span>
             </el-tag>
           </template>
         </el-table-column>

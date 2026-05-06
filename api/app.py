@@ -88,6 +88,7 @@ def api_calendar():
                 'amount': e['amount'],
                 'is_today': e['is_today'],
                 'days_until': e['days_until'],
+                'is_overdue': e.get('is_overdue', False),
             }
             for e in entries
         ]
@@ -104,52 +105,60 @@ def api_report():
 
     rows = get_report_data(period_type, period_value)
 
-    # Aggregate by bank
-    bank_data = {}
+    # Aggregate by bank + card_last4 for detail, and by bank for summary
+    card_data = {}  # (bank, card_last4) -> { months, total, min_total }
+    bank_data = {}  # bank -> { total, min_total }
     total_all = 0
     min_all = 0
 
     for bank, card_last4, month, amount, min_pay in rows:
+        key = (bank, card_last4)
+        if key not in card_data:
+            card_data[key] = {'months': {}, 'total': 0, 'min_total': 0}
+        if month not in card_data[key]['months']:
+            card_data[key]['months'][month] = {'amount': 0, 'min_pay': 0}
+        card_data[key]['months'][month]['amount'] += amount
+        card_data[key]['months'][month]['min_pay'] = (min_pay or 0)
+        card_data[key]['total'] += amount
+        if min_pay:
+            card_data[key]['min_total'] += min_pay
+
         if bank not in bank_data:
-            bank_data[bank] = {'cards': set(), 'months': {}, 'total': 0, 'min_total': 0}
-        bank_data[bank]['cards'].add(card_last4)
-        if month not in bank_data[bank]['months']:
-            bank_data[bank]['months'][month] = {'amount': 0, 'min_pay': 0}
-        bank_data[bank]['months'][month]['amount'] += amount
-        bank_data[bank]['months'][month]['min_pay'] = (min_pay or 0)
+            bank_data[bank] = {'total': 0, 'min_total': 0}
         bank_data[bank]['total'] += amount
         if min_pay:
             bank_data[bank]['min_total'] += min_pay
+
         total_all += amount
         if min_pay:
             min_all += min_pay
 
-    # Format months as sorted list
-    formatted_months = {}
-    for bank, info in bank_data.items():
-        formatted_months[bank] = []
+    # Format card detail rows: bank + card_last4 + months
+    card_detail = {}  # "bank|||card_label" -> [{ month, amount, min_pay }]
+    for (bank, card_last4), info in sorted(card_data.items()):
+        label = f"****{card_last4}" if card_last4 else '—'
+        months_list = []
         for month in sorted(info['months'].keys()):
             entry = info['months'][month]
-            formatted_months[bank].append({
+            months_list.append({
                 'month': month,
                 'amount': entry['amount'],
                 'min_pay': entry['min_pay'],
             })
+        card_detail[f"{bank}|||{label}"] = months_list
 
-    # Bank summary
+    # Bank summary (no card number column)
     bank_summary = []
     for bank in sorted(bank_data.keys()):
         info = bank_data[bank]
-        cards_str = ', '.join(f"****{c}" for c in info['cards'] if c) or '—'
         bank_summary.append({
             'bank': bank,
             'total': info['total'],
             'min_total': info['min_total'],
-            'cards': cards_str,
         })
 
     return jsonify({
-        'bank_months': formatted_months,
+        'card_detail': card_detail,
         'bank_summary': bank_summary,
         'total': total_all,
         'min_total': min_all,

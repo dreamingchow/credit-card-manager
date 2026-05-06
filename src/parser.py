@@ -76,6 +76,43 @@ def decode_email(filepath):
     return text, soup, html_raw
 
 
+def extract_pdf_from_email(filepath):
+    """从邮件中提取PDF附件并返回路径。"""
+    with open(filepath, 'rb') as f:
+        raw = f.read()
+
+    msg = email.message_from_bytes(raw, policy=default)
+    
+    if not msg.is_multipart():
+        return None
+    
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        filename = part.get_filename()
+        
+        if filename and content_type in ('application/pdf', 'application/octet-stream'):
+            # Check if it's actually a PDF
+            payload = part.get_payload(decode=True)
+            if payload and isinstance(payload, bytes):
+                # Verify PDF magic number
+                if payload[:4] == b'%PDF':
+                    # Save to bills directory with same name as email file
+                    import os
+                    base = Path(filepath).stem
+                    # Remove .html extension from stem if present
+                    if base.endswith('.html'):
+                        base = base[:-5]
+                    pdf_name = f"{base}.pdf"
+                    out_path = BILLS_DIR / pdf_name
+                    
+                    with open(out_path, 'wb') as pf:
+                        pf.write(payload)
+                    return str(out_path)
+    
+    return None
+
+
+
 def extract_amount(text):
     """从文本中提取应还金额。"""
     # 上海银行特殊处理: "本期余额" + 数字+/-
@@ -441,7 +478,50 @@ def extract_from_pdf(filepath):
             if dm:
                 info['due_day'] = int(dm.group(2))
 
+    # 农业银行PDF格式 (slash date format):
+    #   本期应还款额(欠款为-) New Balance
+    #   人民币(CNY)
+    #   (sometimes amount is missing here due to PDF layout)
+    #   到期还款日 Payment Due Date 2026/05/02
+    #   最低还款额(欠款为-) Min Payment
+    #   -12.00   <-- this is actually New Balance value (溢缴款)
+    #   人民币(CNY)
+    #   0.00     <-- this is the real min payment
+    if not info.get('total_amount'):
+        # Try to find amount after 人民币(CNY) following New Balance
+        m = re.search(r'本期应还款额[^\n]*New Balance[\s\S]*?人民币\s*\(CNY\)\s*(-?[\d,]+\.?\d{2})', full_text)
+        if m:
+            val = float(m.group(1).replace(',', ''))
+            info['total_amount'] = abs(val) if val < 0 else val
+        else:
+            # Fallback: the amount might appear after Min Payment line (ABC PDF layout quirk)
+            m = re.search(r'最低还款额[^\n]*Min Payment\s*(-?[\d,]+\.?\d{2})', full_text)
+            if m:
+                val = float(m.group(1).replace(',', ''))
+                info['total_amount'] = abs(val) if val < 0 else val
+
+    if not info.get('min_payment'):
+        # Find the number AFTER 人民币(CNY) in the Min Payment section
+        m = re.search(r'最低还款额[^\n]*Min Payment[\s\S]*?人民币\s*\(CNY\)\s*(\d[\d,]*\.?\d*)', full_text)
+        if m:
+            info['min_payment'] = float(m.group(1).replace(',', ''))
+
+    if not info.get('due_date_full'):
+        # ABC PDF: date appears before "Payment Due Date" label in table row
+        m = re.search(r'(\d{4})/(\d{2})/(\d{2})[\s\S]*?Payment Due Date', full_text)
+        # The first date matched is the statement cycle start, not due date.
+        # Find the LAST date before Payment Due Date in the table row:
+        #   625998******0301 2026/03/08-2026/04/07 2026/05/02\nCard No Statement Cycle Payment Due Date
+        # Match the date right before \nCard No (the third column)
+        m2 = re.search(r'\d{4}/\d{2}/\d{2}-\d{4}/\d{2}/\d{2}\s+(\d{4})/(\d{2})/(\d{2})[\s\S]*?Payment Due Date', full_text)
+        if m2:
+            m = m2
+        if m:
+            info['due_date_full'] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+            info['due_day'] = int(m.group(3))
+
     return info
+
 
 
 def extract_bank_from_filename(filename):
@@ -490,13 +570,14 @@ def process_file(conn, filepath):
         if not month:
             month = datetime.now().strftime('%Y-%m')
 
-    # Try PDF first
+    # Try PDF first (standalone .pdf file next to .html)
     pdf_path = str(filepath).replace('.html', '.pdf')
     if not os.path.exists(pdf_path):
         pdf_path2 = str(filepath).replace('.html', '.PDF')
         if os.path.exists(pdf_path2):
             pdf_path = pdf_path2
 
+    # Also search for PDF in bills directory
     if not os.path.exists(pdf_path):
         import glob as _glob
         pdf_matches = _glob.glob(f'bills/*{bank}*{month.replace("-","年")}月*.PDF')
@@ -519,6 +600,17 @@ def process_file(conn, filepath):
 
     # Decode email and extract text
     text, soup, html_raw = decode_email(filepath)
+
+    # If HTML text is empty (email contains only PDF attachment),
+    # try extracting PDF from the email itself
+    if not text.strip():
+        pdf_from_email = extract_pdf_from_email(filepath)
+        if pdf_from_email:
+            pdf_info = extract_from_pdf(pdf_from_email)
+            if pdf_info and (pdf_info.get('card_last4') or pdf_info.get('total_amount')):
+                info = pdf_info
+                print(f"  ✓ PDF解析 {bank} {month} (from email)")
+                return _save_and_report(conn, bank, month, info, filename)
 
     # Try bank-specific parser first
     parser = get_parser(bank)

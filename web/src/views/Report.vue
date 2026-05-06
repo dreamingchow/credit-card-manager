@@ -85,6 +85,7 @@
       <template #header>各卡明细</template>
       <el-table :data="detailRows" stripe size="small">
         <el-table-column prop="bank" label="银行" />
+        <el-table-column prop="card" label="卡号" width="100" />
         <el-table-column prop="month" label="期数" width="100" />
         <el-table-column prop="amount" label="应还金额" width="120">
           <template #default="{ row }">¥{{ format(row.amount) }}</template>
@@ -100,7 +101,6 @@
       <template #header>银行汇总</template>
       <el-table :data="data.bank_summary" stripe>
         <el-table-column prop="bank" label="银行" />
-        <el-table-column prop="cards" label="卡号" width="100" />
         <el-table-column prop="total" label="总应还" width="140">
           <template #default="{ row }">¥{{ format(row.total) }}</template>
         </el-table-column>
@@ -220,12 +220,13 @@ async function loadReport() {
 
 const detailRows = computed(() => {
   const rows = []
-  for (const bank in data.value.bank_months) {
-    for (const m of data.value.bank_months[bank]) {
-      rows.push({ bank, ...m })
+  for (const [key, months] of Object.entries(data.value.card_detail)) {
+    const [bank, card] = key.split('|||')  // use delimiter since key was (bank, label)
+    for (const m of months) {
+      rows.push({ bank, card, ...m })
     }
   }
-  return rows.sort((a, b) => a.bank.localeCompare(b.bank) || a.month.localeCompare(b.month))
+  return rows.sort((a, b) => a.bank.localeCompare(b.bank) || a.card.localeCompare(b.card) || a.month.localeCompare(b.month))
 })
 
 onMounted(loadReport)

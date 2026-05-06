@@ -158,7 +158,7 @@ def get_report_data(period_type='month', period_value=None):
 def get_calendar_data(year=None, month=None):
     """获取日历视图数据。
 
-    Returns list of dicts: {bank, card_last4, due_date_full (next occurrence), amount, is_today, days_until}
+    Returns list of dicts: {bank, card_last4, due_date (original), amount, is_today, days_until, is_overdue}
     """
     from datetime import datetime, timedelta
 
@@ -179,41 +179,44 @@ def get_calendar_data(year=None, month=None):
     conn.close()
 
     today = datetime.now().date()
-    # Target month range
+    # Target month range: show bills due in target month + next month for context
     target_start = datetime(year, month, 1).date()
-    # Go back 1 day for previous month's spillover, forward to end of month + look-ahead
-    target_end = datetime(year, min(month + 1, 12), 1).date() - timedelta(days=1)
-    # Extend: also include next month's first due dates for context
-    next_month_end = datetime(year, min(month + 2, 12), 1).date() - timedelta(days=1)
+    target_end = datetime(year, min(month + 2, 12), 1).date() - timedelta(days=1)
+
+    # Also collect overdue bills (due before target_start but still unpaid)
+    overdue_entries = []
 
     calendar_entries = []
     for bill_id, bank, card_last4, due_date_full, amount in rows:
-        candidate = datetime.strptime(due_date_full, '%Y-%m-%d').date()
+        original_due = datetime.strptime(due_date_full, '%Y-%m-%d').date()
 
-        # Advance to next occurrence >= today
-        while candidate < today:
-            y, m, d = candidate.year, candidate.month, candidate.day
-            if m == 12:
-                candidate = datetime(y + 1, 1, d).date()
-            else:
-                import calendar as cal
-                max_day = cal.monthrange(y, m + 1)[1]
-                d = min(d, max_day)
-                candidate = datetime(y, m + 1, d).date()
-
-        if target_start <= candidate <= next_month_end:
-            days_until = (candidate - today).days
+        # If overdue (before today), add to overdue list — show all unpaid overdue bills
+        if original_due < today:
+            days_past = (today - original_due).days
+            overdue_entries.append({
+                'bank': bank,
+                'card_last4': card_last4 or '?',
+                'due_date': original_due,
+                'amount': amount,
+                'is_today': False,
+                'days_until': -days_past,  # negative = overdue by N days
+                'is_overdue': True,
+            })
+        elif target_start <= original_due <= target_end:
+            days_until = (original_due - today).days
             calendar_entries.append({
                 'bank': bank,
                 'card_last4': card_last4 or '?',
-                'due_date': candidate,
+                'due_date': original_due,
                 'amount': amount,
-                'is_today': candidate == today,
+                'is_today': original_due == today,
                 'days_until': days_until,
+                'is_overdue': False,
             })
 
-    calendar_entries.sort(key=lambda e: (e['due_date'], e['bank']))
-    return calendar_entries
+    # Overdue first (sorted by most overdue), then upcoming
+    all_entries = sorted(overdue_entries + calendar_entries, key=lambda e: (e['due_date'], e['bank']))
+    return all_entries
 
 
 def get_unpaid_summary():
