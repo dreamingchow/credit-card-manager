@@ -589,7 +589,7 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
         if m:
             name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
             if name and len(name) >= 2:
-                return name
+                return _clean_holder_name(name)
 
         # Pattern 3: 尊敬的 <font>...</font> (浦发 base64 decoded format)
         m = re.search(r'尊敬的\s*<[^>]*>([^<]+)</', text)
@@ -602,30 +602,49 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
             else:
                 name = raw_name
             if name and len(name) >= 2:
-                return name
+                return _clean_holder_name(name)
 
         # Pattern 4: "尊敬的 XXX 先生/女士" (with space between name and gender)
         m = re.search(r'尊敬的\s*([^\s<\r\n&：:，,]{2,6})\s+(先生|女士)', text)
         if m:
             name = m.group(1).replace('&nbsp;', '').strip() + ' ' + m.group(2)
             if name and len(name) >= 3:
-                return name
+                return _clean_holder_name(name)
 
         # Pattern 6: "尊敬的 XXX先生/女士" (no space between name and gender)
         m = re.search(r'尊敬的\s*([^\s<\r\n&：:，,]{2,6})(先生|女士)', text)
         if m:
             name = m.group(1).replace('&nbsp;', '').strip() + ' ' + m.group(2)
             if name and len(name) >= 3:
-                return name
+                return _clean_holder_name(name)
 
         # Pattern 1: "尊敬的 XXX" (plain text, no gender suffix) - least specific
         m = re.search(r'尊敬的\s*([^\s<\r\n&：:，,先生女士]{2,6})', text)
         if m:
             name = m.group(1).replace('&nbsp;', '').strip()
             if name and len(name) >= 2:
-                return name
+                return _clean_holder_name(name)
 
     return None
+
+
+def _clean_holder_name(name):
+    """清理持卡人姓名: 去掉'先生/女士'后缀，尝试补全带*的名字。"""
+    # Strip 先生/女士 suffix
+    name = re.sub(r'\s*(先生|女士)$', '', name)
+    
+    # Try to fill in masked names based on known data
+    # 周*明 / 周**明 -> 周君明
+    if re.match(r'^周\*+明$', name):
+        return '周君明'
+    # 石* -> 石磊
+    if re.match(r'^石\*+$', name):
+        return '石磊'
+    # 周** (浦发卡，无法确定全名) -> 周*
+    if re.match(r'^周\*\*+$', name):
+        return '周*'
+    
+    return name
 
 
 def extract_holder_name_from_pdf(filepath):
@@ -643,12 +662,12 @@ def extract_holder_name_from_pdf(filepath):
                 # Pattern: "尊敬的周君明 先生" (浦发 PDF format)
                 m = re.search(r'尊敬的\s*([\u4e00-\u9fff]{2,6})\s*(先生|女士)', text)
                 if m:
-                    return m.group(1) + ' ' + m.group(2)
+                    return _clean_holder_name(m.group(1) + ' ' + m.group(2))
 
                 # Pattern: "尊敬的 XXX" (without gender)
                 m = re.search(r'尊敬的\s*([\u4e00-\u9fff]{2,6})', text)
                 if m:
-                    return m.group(1)
+                    return _clean_holder_name(m.group(1))
     except Exception:
         pass
 
@@ -821,8 +840,9 @@ def _save_and_report(conn, bank, month, info, filename):
 
     # Also update holder_name if extracted
     if info.get('holder_name'):
+        clean_name = _clean_holder_name(info['holder_name'])
         c.execute('''UPDATE cards SET holder_name = ?, updated_at = datetime('now') WHERE id = ?''',
-                  (info['holder_name'], card_id))
+                  (clean_name, card_id))
 
     # Insert bill record
     c.execute('''INSERT INTO bills (card_id, bank, bill_month, total_amount, min_payment,
