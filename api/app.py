@@ -3,7 +3,7 @@
 import sys
 import os
 from pathlib import Path
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory, make_response
 from flask_cors import CORS
 
 # Add project root to path so we can import src.db
@@ -20,7 +20,8 @@ from src.db import (
     get_connection,
 )
 
-app = Flask(__name__)
+WEB_DIR = BASE_DIR / 'web' / 'dist'
+app = Flask(__name__, static_folder=str(WEB_DIR), static_url_path='')
 CORS(app)
 
 
@@ -276,6 +277,25 @@ def api_mark_paid():
 
 
 # ── Health check ────────────────────────────────────
+
+@app.route('/')
+def index():
+    return send_from_directory(str(WEB_DIR), 'index.html')
+
+
+@app.after_request
+def spa_fallback(response):
+    # SPA: if the requested path is not an API route and file doesn't exist, serve index.html
+    if (response.status_code == 404 
+        and not request.path.startswith('/api/')
+        and not request.path.startswith('/favicon')
+        and not request.path.startswith('/icons')):
+        try:
+            return make_response(send_from_directory(str(WEB_DIR), 'index.html'), 200)
+        except Exception:
+            pass
+    return response
+
 
 @app.route('/api/health')
 def api_health():

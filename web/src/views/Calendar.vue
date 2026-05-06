@@ -13,23 +13,23 @@
 
     <!-- Calendar grid -->
     <el-card shadow="hover">
-      <el-table :data="calendarEntries" stripe>
-        <el-table-column prop="day" label="日期" width="120">
+      <el-table :data="calendarEntries" stripe style="width: 100%">
+        <el-table-column prop="due_date" label="日期" width="140" fixed>
           <template #default="{ row }">
             <span :style="{ fontWeight: row.is_today ? 'bold' : 'normal', color: row.is_today ? '#e53e3e' : '' }">
-              {{ row.month }}月{{ row.day }}日
+              {{ row.due_date }}
               <span v-if="row.is_today" style="color: #e53e3e"> 🔴今天</span>
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="bank" label="银行" />
-        <el-table-column prop="card_last4" label="卡号" width="80">
+        <el-table-column prop="bank" label="银行" width="120" />
+        <el-table-column prop="card_last4" label="卡号" width="120">
           <template #default="{ row }">{{ row.card_last4 ? '****' + row.card_last4 : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="amount" label="金额" width="120">
+        <el-table-column prop="amount" label="金额" width="140" sortable>
           <template #default="{ row }">¥{{ format(row.amount) }}</template>
         </el-table-column>
-        <el-table-column prop="days_until" label="倒计时">
+        <el-table-column prop="days_until" label="倒计时" width="100">
           <template #default="{ row }">
             <el-tag :type="row.days_until === 0 ? 'danger' : row.days_until <= 3 ? 'warning' : 'success'" size="small">
               {{ row.days_until === 0 ? '今天' : row.days_until + '天后' }}

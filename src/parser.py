@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from bs4 import BeautifulSoup
 
+from src.parsers import get_parser
 try:
     import pdfplumber
     HAS_PDFPLUMBER = True
@@ -509,11 +510,12 @@ def process_file(conn, filepath):
             else:
                 pdf_path = pdf_matches[0]
 
-        pdf_info = extract_from_pdf(pdf_path)
-        if pdf_info and (pdf_info.get('card_last4') or pdf_info.get('total_amount')):
-            info = pdf_info
-            print(f"  ✓ PDF解析 {bank} {month}")
-            return _save_and_report(conn, bank, month, info, filename)
+        if os.path.exists(pdf_path):
+            pdf_info = extract_from_pdf(pdf_path)
+            if pdf_info and (pdf_info.get('card_last4') or pdf_info.get('total_amount')):
+                info = pdf_info
+                print(f"  ✓ PDF解析 {bank} {month}")
+                return _save_and_report(conn, bank, month, info, filename)
 
     # Decode email and extract text
     text, soup, html_raw = decode_email(filepath)

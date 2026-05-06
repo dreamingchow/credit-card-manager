@@ -6,21 +6,21 @@
     <el-card shadow="hover">
       <template #header>当前未还账单</template>
 
-      <el-table :data="unpaidBills" stripe>
-        <el-table-column prop="bank" label="银行" />
-        <el-table-column prop="card_last4" label="卡号" width="80">
+      <el-table :data="unpaidBills" stripe style="width: 100%">
+        <el-table-column prop="bank" label="银行" width="120" />
+        <el-table-column prop="card_last4" label="卡号" width="120">
           <template #default="{ row }">{{ row.card_last4 ? '****' + row.card_last4 : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="bill_month" label="账单月份" width="100" />
+        <el-table-column prop="bill_month" label="账单月份" width="120" />
         <el-table-column prop="amount" label="金额" width="140">
           <template #default="{ row }">¥{{ format(row.amount) }}</template>
         </el-table-column>
-        <el-table-column prop="due_date_full" label="到期日" width="120">
+        <el-table-column prop="due_date_full" label="到期日" width="140">
           <template #default="{ row }">{{ row.due_date_full || '—' }}</template>
         </el-table-column>
         <!-- Hidden bill_month for markPaid API -->
         <el-table-column prop="_bill_month" width="1" />
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="confirmPay(row)">标记已还</el-button>
           </template>

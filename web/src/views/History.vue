@@ -30,7 +30,7 @@
           <span style="margin-left: 8px; color: #718096">累计 ¥{{ format(info.total) }}</span>
         </template>
 
-        <el-table :data="info.records" stripe size="small">
+        <el-table :data="info.records" stripe size="small" style="width: 100%">
           <el-table-column prop="bill_month" label="账单月份" width="120" />
           <el-table-column prop="card_last4" label="卡号末四位" width="120">
             <template #default="{ row }">{{ row.card_last4 ? '****' + row.card_last4 : '—' }}</template>
@@ -41,7 +41,7 @@
               <el-tag v-if="row.amount < 0" size="small" type="warning" effect="plain" style="margin-left: 6px">溢缴款</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="pay_date" label="还款时间">
+          <el-table-column prop="pay_date" label="还款时间" width="180">
             <template #default="{ row }">{{ row.pay_date || '—' }}</template>
           </el-table-column>
         </el-table>
