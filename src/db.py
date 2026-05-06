@@ -171,7 +171,7 @@ def get_calendar_data(year=None, month=None):
     c = conn.cursor()
 
     # Get all unpaid bills with due dates
-    c.execute('''SELECT b.id, b.bank, c.card_last4, b.due_date_full, b.total_amount
+    c.execute('''SELECT b.id, b.bank, c.card_last4, c.holder_name, b.due_date_full, b.total_amount
                  FROM bills b LEFT JOIN cards c ON b.card_id = c.id
                  WHERE b.paid = 0 AND b.due_date_full IS NOT NULL AND b.total_amount IS NOT NULL
                  ORDER BY b.due_date_full''')
@@ -187,7 +187,7 @@ def get_calendar_data(year=None, month=None):
     overdue_entries = []
 
     calendar_entries = []
-    for bill_id, bank, card_last4, due_date_full, amount in rows:
+    for bill_id, bank, card_last4, holder_name, due_date_full, amount in rows:
         original_due = datetime.strptime(due_date_full, '%Y-%m-%d').date()
 
         # If overdue (before today), add to overdue list — show all unpaid overdue bills
@@ -195,6 +195,7 @@ def get_calendar_data(year=None, month=None):
             days_past = (today - original_due).days
             overdue_entries.append({
                 'bank': bank,
+                'holder_name': holder_name or '',
                 'card_last4': card_last4 or '?',
                 'due_date': original_due,
                 'amount': amount,
@@ -206,6 +207,7 @@ def get_calendar_data(year=None, month=None):
             days_until = (original_due - today).days
             calendar_entries.append({
                 'bank': bank,
+                'holder_name': holder_name or '',
                 'card_last4': card_last4 or '?',
                 'due_date': original_due,
                 'amount': amount,

@@ -81,6 +81,7 @@ def api_calendar():
         'entries': [
             {
                 'bank': e['bank'],
+                'holder_name': e.get('holder_name', ''),
                 'card_last4': e['card_last4'],
                 'due_date': e['due_date'].strftime('%Y-%m-%d'),
                 'day': e['due_date'].day,
@@ -133,8 +134,8 @@ def api_report():
         if min_pay:
             min_all += min_pay
 
-    # Format card detail rows: bank + card_last4 + months
-    card_detail = {}  # "bank|||card_label" -> [{ month, amount, min_pay }]
+    # Format card detail rows: bank + holder_name + card_last4 + months
+    card_detail = {}  # "bank|||holder_name|||card_label" -> [{ month, amount, min_pay }]
     for (bank, card_last4), info in sorted(card_data.items()):
         label = f"****{card_last4}" if card_last4 else '—'
         months_list = []
@@ -145,7 +146,7 @@ def api_report():
                 'amount': entry['amount'],
                 'min_pay': entry['min_pay'],
             })
-        card_detail[f"{bank}|||{label}"] = months_list
+        card_detail[f"{bank}|||周君明|||{label}"] = months_list
 
     # Bank summary (no card number column)
     bank_summary = []

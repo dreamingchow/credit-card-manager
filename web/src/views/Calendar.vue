@@ -22,8 +22,11 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="bank" label="银行" width="120" />
-        <el-table-column prop="card_last4" label="卡号" width="120">
+        <el-table-column prop="bank" label="银行" width="100" />
+        <el-table-column prop="holder_name" label="持卡人" width="80">
+          <template #default="{ row }">{{ row.holder_name || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="card_last4" label="卡号" width="100">
           <template #default="{ row }">{{ row.card_last4 ? '****' + row.card_last4 : '—' }}</template>
         </el-table-column>
         <el-table-column prop="amount" label="金额" width="140" sortable>

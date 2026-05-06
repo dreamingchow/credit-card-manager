@@ -85,6 +85,9 @@
       <template #header>各卡明细</template>
       <el-table :data="detailRows" stripe size="small">
         <el-table-column prop="bank" label="银行" />
+        <el-table-column prop="holder_name" label="持卡人" width="80">
+          <template #default="{ row }">{{ row.holder_name || '—' }}</template>
+        </el-table-column>
         <el-table-column prop="card" label="卡号" width="100" />
         <el-table-column prop="month" label="期数" width="100" />
         <el-table-column prop="amount" label="应还金额" width="120">
@@ -221,9 +224,12 @@ async function loadReport() {
 const detailRows = computed(() => {
   const rows = []
   for (const [key, months] of Object.entries(data.value.card_detail)) {
-    const [bank, card] = key.split('|||')  // use delimiter since key was (bank, label)
+    const parts = key.split('|||')
+    const bank = parts[0]
+    const holder_name = parts[1] || ''
+    const card = parts[2] || '—'
     for (const m of months) {
-      rows.push({ bank, card, ...m })
+      rows.push({ bank, holder_name, card, ...m })
     }
   }
   return rows.sort((a, b) => a.bank.localeCompare(b.bank) || a.card.localeCompare(b.card) || a.month.localeCompare(b.month))
