@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+db/cards.db
+db/*.bak.*
+bills/
+reports/
+logs/
+.env

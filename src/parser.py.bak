@@ -13,7 +13,6 @@ from pathlib import Path
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-from src.parsers import get_parser
 try:
     import pdfplumber
     HAS_PDFPLUMBER = True
@@ -74,43 +73,6 @@ def decode_email(filepath):
         tag.decompose()
 
     return text, soup, html_raw
-
-
-def extract_pdf_from_email(filepath):
-    """从邮件中提取PDF附件并返回路径。"""
-    with open(filepath, 'rb') as f:
-        raw = f.read()
-
-    msg = email.message_from_bytes(raw, policy=default)
-    
-    if not msg.is_multipart():
-        return None
-    
-    for part in msg.walk():
-        content_type = part.get_content_type()
-        filename = part.get_filename()
-        
-        if filename and content_type in ('application/pdf', 'application/octet-stream'):
-            # Check if it's actually a PDF
-            payload = part.get_payload(decode=True)
-            if payload and isinstance(payload, bytes):
-                # Verify PDF magic number
-                if payload[:4] == b'%PDF':
-                    # Save to bills directory with same name as email file
-                    import os
-                    base = Path(filepath).stem
-                    # Remove .html extension from stem if present
-                    if base.endswith('.html'):
-                        base = base[:-5]
-                    pdf_name = f"{base}.pdf"
-                    out_path = BILLS_DIR / pdf_name
-                    
-                    with open(out_path, 'wb') as pf:
-                        pf.write(payload)
-                    return str(out_path)
-    
-    return None
-
 
 
 def extract_amount(text):
@@ -478,181 +440,7 @@ def extract_from_pdf(filepath):
             if dm:
                 info['due_day'] = int(dm.group(2))
 
-    # 农业银行PDF格式 (slash date format):
-    #   本期应还款额(欠款为-) New Balance
-    #   人民币(CNY)
-    #   (sometimes amount is missing here due to PDF layout)
-    #   到期还款日 Payment Due Date 2026/05/02
-    #   最低还款额(欠款为-) Min Payment
-    #   -12.00   <-- this is actually New Balance value (溢缴款)
-    #   人民币(CNY)
-    #   0.00     <-- this is the real min payment
-    if not info.get('total_amount'):
-        # Try to find amount after 人民币(CNY) following New Balance
-        m = re.search(r'本期应还款额[^\n]*New Balance[\s\S]*?人民币\s*\(CNY\)\s*(-?[\d,]+\.?\d{2})', full_text)
-        if m:
-            val = float(m.group(1).replace(',', ''))
-            info['total_amount'] = abs(val) if val < 0 else val
-        else:
-            # Fallback: the amount might appear after Min Payment line (ABC PDF layout quirk)
-            m = re.search(r'最低还款额[^\n]*Min Payment\s*(-?[\d,]+\.?\d{2})', full_text)
-            if m:
-                val = float(m.group(1).replace(',', ''))
-                info['total_amount'] = abs(val) if val < 0 else val
-
-    if not info.get('min_payment'):
-        # Find the number AFTER 人民币(CNY) in the Min Payment section
-        m = re.search(r'最低还款额[^\n]*Min Payment[\s\S]*?人民币\s*\(CNY\)\s*(\d[\d,]*\.?\d*)', full_text)
-        if m:
-            info['min_payment'] = float(m.group(1).replace(',', ''))
-
-    if not info.get('due_date_full'):
-        # ABC PDF: date appears before "Payment Due Date" label in table row
-        m = re.search(r'(\d{4})/(\d{2})/(\d{2})[\s\S]*?Payment Due Date', full_text)
-        # The first date matched is the statement cycle start, not due date.
-        # Find the LAST date before Payment Due Date in the table row:
-        #   625998******0301 2026/03/08-2026/04/07 2026/05/02\nCard No Statement Cycle Payment Due Date
-        # Match the date right before \nCard No (the third column)
-        m2 = re.search(r'\d{4}/\d{2}/\d{2}-\d{4}/\d{2}/\d{2}\s+(\d{4})/(\d{2})/(\d{2})[\s\S]*?Payment Due Date', full_text)
-        if m2:
-            m = m2
-        if m:
-            info['due_date_full'] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-            info['due_day'] = int(m.group(3))
-
     return info
-
-
-
-def extract_holder_name_from_email(filepath, html_raw, bank):
-    """从邮件原始内容提取持卡人姓名。
-
-    支持多种编码和格式:
-    - 浦发 HTML: base64 编码 body → 解码后搜索 "尊敬的 XXX"
-    - 中信 HTML: quoted-printable + UTF-8 → 搜索 <span data-key="customerName">姓名</span>
-    - 民生 HTML: gb18030 编码 → 搜索 "尊敬的 XXX"
-    - 交通 HTML: GBK 编码 → 搜索 "尊敬的 XXX"
-    - 浦发 PDF: 直接提取 "尊敬的 XXX 先生/女士"
-    """
-    if not html_raw:
-        return None
-
-    # Try multiple encodings for the raw content
-    texts_to_try = []
-
-    # 1. Try decoding as-is (UTF-8)
-    try:
-        texts_to_try.append(('utf-8', html_raw))
-    except Exception:
-        pass
-
-    # 2. Try common Chinese encodings on raw bytes
-    if isinstance(html_raw, str):
-        # If it's already a string, try re-encoding/decoding with different encodings
-        for enc in ['gbk', 'gb2312', 'gb18030']:
-            try:
-                raw_bytes = html_raw.encode('utf-8', errors='replace')
-                decoded = raw_bytes.decode(enc, errors='replace')
-                texts_to_try.append((enc, decoded))
-            except Exception:
-                continue
-    else:
-        # html_raw is bytes, decode with various encodings
-        for enc in ['utf-8', 'gbk', 'gb2312', 'gb18030']:
-            try:
-                texts_to_try.append((enc, html_raw.decode(enc, errors='replace')))
-            except Exception:
-                continue
-
-    # 3. Also try decoding the raw file bytes directly with all encodings
-    try:
-        with open(filepath, 'rb') as f:
-            raw_file = f.read()
-        msg = email.message_from_bytes(raw_file, policy=default)
-        for part in msg.walk():
-            if part.get_content_type() == 'text/html':
-                payload = part.get_payload(decode=True)
-                if payload and isinstance(payload, bytes):
-                    for enc in ['utf-8', 'gbk', 'gb2312', 'gb18030']:
-                        try:
-                            texts_to_try.append((enc, payload.decode(enc, errors='replace')))
-                        except Exception:
-                            continue
-                    break
-    except Exception:
-        pass
-
-    # Search for name patterns in all decoded texts (order matters: more specific first)
-    for enc, text in texts_to_try:
-        # Pattern 2: <span data-key="customerName">姓名</span> (中信 format) - most specific
-        m = re.search(r'<[^>]*data-key\s*=\s*["\']customerName["\'][^>]*>([^<]+)</', text)
-        if m:
-            name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
-            if name and len(name) >= 2:
-                return name
-
-        # Pattern 3: 尊敬的 <font>...</font> (浦发 base64 decoded format)
-        m = re.search(r'尊敬的\s*<[^>]*>([^<]+)</', text)
-        if m:
-            raw_name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
-            # Handle "姓名先生/女士" without space (e.g., 周君明先生)
-            m2 = re.match(r'([\u4e00-\u9fff]{2,6})(先生|女士)', raw_name)
-            if m2:
-                name = m2.group(1) + ' ' + m2.group(2)
-            else:
-                name = raw_name
-            if name and len(name) >= 2:
-                return name
-
-        # Pattern 4: "尊敬的 XXX 先生/女士" (with space between name and gender)
-        m = re.search(r'尊敬的\s*([^\s<\r\n&：:，,]{2,6})\s+(先生|女士)', text)
-        if m:
-            name = m.group(1).replace('&nbsp;', '').strip() + ' ' + m.group(2)
-            if name and len(name) >= 3:
-                return name
-
-        # Pattern 6: "尊敬的 XXX先生/女士" (no space between name and gender)
-        m = re.search(r'尊敬的\s*([^\s<\r\n&：:，,]{2,6})(先生|女士)', text)
-        if m:
-            name = m.group(1).replace('&nbsp;', '').strip() + ' ' + m.group(2)
-            if name and len(name) >= 3:
-                return name
-
-        # Pattern 1: "尊敬的 XXX" (plain text, no gender suffix) - least specific
-        m = re.search(r'尊敬的\s*([^\s<\r\n&：:，,先生女士]{2,6})', text)
-        if m:
-            name = m.group(1).replace('&nbsp;', '').strip()
-            if name and len(name) >= 2:
-                return name
-
-    return None
-
-
-def extract_holder_name_from_pdf(filepath):
-    """从PDF账单提取持卡人姓名。"""
-    if not HAS_PDFPLUMBER:
-        return None
-
-    try:
-        with pdfplumber.open(filepath) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if not text:
-                    continue
-
-                # Pattern: "尊敬的周君明 先生" (浦发 PDF format)
-                m = re.search(r'尊敬的\s*([\u4e00-\u9fff]{2,6})\s*(先生|女士)', text)
-                if m:
-                    return m.group(1) + ' ' + m.group(2)
-
-                # Pattern: "尊敬的 XXX" (without gender)
-                m = re.search(r'尊敬的\s*([\u4e00-\u9fff]{2,6})', text)
-                if m:
-                    return m.group(1)
-    except Exception:
-        pass
-
-    return None
 
 
 def extract_bank_from_filename(filename):
@@ -701,14 +489,13 @@ def process_file(conn, filepath):
         if not month:
             month = datetime.now().strftime('%Y-%m')
 
-    # Try PDF first (standalone .pdf file next to .html)
+    # Try PDF first
     pdf_path = str(filepath).replace('.html', '.pdf')
     if not os.path.exists(pdf_path):
         pdf_path2 = str(filepath).replace('.html', '.PDF')
         if os.path.exists(pdf_path2):
             pdf_path = pdf_path2
 
-    # Also search for PDF in bills directory
     if not os.path.exists(pdf_path):
         import glob as _glob
         pdf_matches = _glob.glob(f'bills/*{bank}*{month.replace("-","年")}月*.PDF')
@@ -722,30 +509,14 @@ def process_file(conn, filepath):
             else:
                 pdf_path = pdf_matches[0]
 
-        if os.path.exists(pdf_path):
-            pdf_info = extract_from_pdf(pdf_path)
-            if pdf_info and (pdf_info.get('card_last4') or pdf_info.get('total_amount')):
-                info = pdf_info
-                print(f"  ✓ PDF解析 {bank} {month}")
-                return _save_and_report(conn, bank, month, info, filename)
+        pdf_info = extract_from_pdf(pdf_path)
+        if pdf_info and (pdf_info.get('card_last4') or pdf_info.get('total_amount')):
+            info = pdf_info
+            print(f"  ✓ PDF解析 {bank} {month}")
+            return _save_and_report(conn, bank, month, info, filename)
 
     # Decode email and extract text
     text, soup, html_raw = decode_email(filepath)
-
-    # If HTML text is empty (email contains only PDF attachment),
-    # try extracting PDF from the email itself
-    if not text.strip():
-        pdf_from_email = extract_pdf_from_email(filepath)
-        if pdf_from_email:
-            pdf_info = extract_from_pdf(pdf_from_email)
-            if pdf_info and (pdf_info.get('card_last4') or pdf_info.get('total_amount')):
-                info = pdf_info
-                # Extract holder name from PDF
-                holder_name = extract_holder_name_from_pdf(pdf_from_email)
-                if holder_name:
-                    info['holder_name'] = holder_name
-                print(f"  ✓ PDF解析 {bank} {month}")
-                return _save_and_report(conn, bank, month, info, filename)
 
     # Try bank-specific parser first
     parser = get_parser(bank)
@@ -768,10 +539,6 @@ def process_file(conn, filepath):
             info['due_day'] = due_info['due_day']
         if due_info.get('due_date_full'):
             info['due_date_full'] = due_info['due_date_full']
-
-    # Extract holder name from HTML email
-    if not info.get('holder_name'):
-        info['holder_name'] = extract_holder_name_from_email(filepath, html_raw, bank)
 
     return _save_and_report(conn, bank, month, info, filename)
 
@@ -819,11 +586,6 @@ def _save_and_report(conn, bank, month, info, filename):
         params.extend([card_id])
         c.execute(f"UPDATE cards SET {', '.join(updates)}, updated_at = datetime('now') WHERE id = ?", params)
 
-    # Also update holder_name if extracted
-    if info.get('holder_name'):
-        c.execute('''UPDATE cards SET holder_name = ?, updated_at = datetime('now') WHERE id = ?''',
-                  (info['holder_name'], card_id))
-
     # Insert bill record
     c.execute('''INSERT INTO bills (card_id, bank, bill_month, total_amount, min_payment,
                  due_date, due_date_full, paid, source_file) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)''',
@@ -836,8 +598,6 @@ def _save_and_report(conn, bank, month, info, filename):
 
     # Print summary
     parts = [f"{bank} {month}"]
-    if info.get('holder_name'):
-        parts.append(f"持卡人: {info['holder_name']}")
     if info.get('card_last4'):
         parts.append(f"****{info['card_last4']}")
     if info.get('total_amount'):
