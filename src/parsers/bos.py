@@ -26,11 +26,13 @@ class BOCOM_SHParser(BillParser):
         if m:
             result['total_amount'] = 0.0
 
-        # 2. 到期还款日 (YYYY年MM月DD日)
-        m = re.search(r'到期还款日\s+Payment Due Date\s+(\d{4})年(\d{1,2})月(\d{1,2})日', text)
-        if m:
-            result['due_date_full'] = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-            result['due_day'] = int(m.group(3))
+        # 2. 最低还款额
+        result['min_payment'] = self._extract_min_payment(text)
+
+        # 3. 到期日 (YYYY年MM月DD日)
+        due_full, due_day = self._extract_due_date(text)
+        result['due_date_full'] = due_full
+        result['due_day'] = due_day
 
         # 3. 卡号末四位
         m = re.search(r'\*{4}(\d{4})', text)

@@ -25,11 +25,13 @@ class BOCParser(BillParser):
             if val is not None:
                 result['total_amount'] = val
 
-        # 2. 到期还款日 (YYYY-MM-DD or YYYY/MM/DD)
-        m = re.search(r'到期还款日\s+Payment Due Date\s+(\d{4})[/-](\d{2})[/-](\d{2})', text)
-        if m:
-            result['due_date_full'] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-            result['due_day'] = int(m.group(3))
+        # 2. 最低还款额
+        result['min_payment'] = self._extract_min_payment(text)
+
+        # 3. 到期日 (YYYY-MM-DD or YYYY/MM/DD)
+        due_full, due_day = self._extract_due_date(text)
+        result['due_date_full'] = due_full
+        result['due_day'] = due_day
 
         # 3. 卡号末四位
         m = re.search(r'\*{4}(\d{4})', text)

@@ -35,6 +35,9 @@
           <el-table-column prop="card_last4" label="卡号末四位" width="120">
             <template #default="{ row }">{{ row.card_last4 ? '****' + row.card_last4 : '—' }}</template>
           </el-table-column>
+          <el-table-column prop="holder_name" label="持卡人" width="100">
+            <template #default="{ row }">{{ row.holder_name || '—' }}</template>
+          </el-table-column>
           <el-table-column prop="amount" label="金额" width="160">
             <template #default="{ row }">
               ¥{{ format(row.amount) }}

@@ -56,3 +56,11 @@ class BillParser(ABC):
                 return f"{year}-{mo:02d}-{d:02d}", d
 
         return None, None
+
+    @staticmethod
+    def _extract_min_payment(text: str) -> Optional[float]:
+        """提取最低还款额."""
+        m = re.search(r'最低还款额\s*[￥¥]?\s*([\d,]+\.?\d{2})', text)
+        if m:
+            return BillParser._safe_float(m.group(1))
+        return None

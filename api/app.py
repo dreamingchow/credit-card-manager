@@ -18,11 +18,33 @@ from src.db import (
     get_spending_by_bank,
     mark_bill_paid,
     get_connection,
+    close_connection,
+    get_annual_fees,
+    get_upcoming_annual_fees,
+    create_annual_fee,
+    add_new_card,
+    update_annual_fee,
+    delete_annual_fee,
+    get_all_cards,
 )
 
 WEB_DIR = BASE_DIR / 'web' / 'dist'
 app = Flask(__name__, static_folder=str(WEB_DIR), static_url_path='')
 CORS(app)
+
+# 请求结束时清理数据库连接（复用线程本地连接，避免关闭问题）
+@app.teardown_appcontext
+def teardown_db(exception=None):
+    close_connection()
+
+
+@app.after_request
+def add_cache_headers(response):
+    if request.path.endswith(('.js', '.css')):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
 
 
 # ── Dashboard / 仪表盘 ──────────────────────────────
@@ -60,7 +82,7 @@ def api_dashboard():
         'unpaid_count': summary['unpaid_count'],
         'unpaid_total': summary['unpaid_total'],
         'unpaid_cards': [
-            {'bank': r[0], 'card_last4': r[1], 'due_date_full': r[2], 'amount': r[3], 'bill_month': r[4]}
+            {'bank': r[0], 'card_last4': r[1], 'due_date_full': r[2], 'amount': r[3], 'bill_month': r[4], 'bill_id': r[5]}
             for r in summary['unpaid_cards']
         ],
         'monthly_trend': trend,
@@ -102,7 +124,12 @@ def api_calendar():
 def api_report():
     """报表数据。"""
     period_type = request.args.get('type', 'month')  # month / quarter / year
-    period_value = request.args.get('value')  # e.g. '2026-05' or '1' (Q) or '2026'
+    period_value = request.args.get('value')  # e.g. '2026-05' or '2026' (year)
+    period_q = request.args.get('q', type=int)  # quarter number (1-4), for quarter type
+
+    # For quarter type, if q is provided, pass (year, q) as tuple
+    if period_type == 'quarter' and period_q is not None and period_value:
+        period_value = f"{period_value}|{period_q}"
 
     rows = get_report_data(period_type, period_value)
 
@@ -112,31 +139,40 @@ def api_report():
     total_all = 0
     min_all = 0
 
-    for bank, card_last4, month, amount, min_pay in rows:
+    for bank, card_last4, holder_name, month, amount, min_pay in rows:
+        is_overpay = amount < 0
         key = (bank, card_last4)
         if key not in card_data:
-            card_data[key] = {'months': {}, 'total': 0, 'min_total': 0}
+            card_data[key] = {'months': {}, 'total': 0, 'min_total': 0, 'holder_name': holder_name or ''}
         if month not in card_data[key]['months']:
-            card_data[key]['months'][month] = {'amount': 0, 'min_pay': 0}
+            card_data[key]['months'][month] = {'amount': 0, 'min_pay': 0, 'is_overpayment': False}
         card_data[key]['months'][month]['amount'] += amount
         card_data[key]['months'][month]['min_pay'] = (min_pay or 0)
-        card_data[key]['total'] += amount
-        if min_pay:
-            card_data[key]['min_total'] += min_pay
+        if is_overpay:
+            card_data[key]['months'][month]['is_overpayment'] = True
+        if not is_overpay:
+            card_data[key]['total'] += amount
+            if min_pay:
+                card_data[key]['min_total'] += min_pay
 
         if bank not in bank_data:
             bank_data[bank] = {'total': 0, 'min_total': 0}
-        bank_data[bank]['total'] += amount
-        if min_pay:
-            bank_data[bank]['min_total'] += min_pay
+        if not is_overpay:
+            bank_data[bank]['total'] += amount
+            if min_pay:
+                bank_data[bank]['min_total'] += min_pay
 
-        total_all += amount
-        if min_pay:
-            min_all += min_pay
+        if not is_overpay:
+            total_all += amount
+            if min_pay:
+                min_all += min_pay
 
     # Format card detail rows: bank + holder_name + card_last4 + months
     card_detail = {}  # "bank|||holder_name|||card_label" -> [{ month, amount, min_pay }]
-    for (bank, card_last4), info in sorted(card_data.items()):
+    def sort_key(item):
+        bank, card_last4 = item[0]
+        return (bank, card_last4 or '')
+    for (bank, card_last4), info in sorted(card_data.items(), key=sort_key):
         label = f"****{card_last4}" if card_last4 else '—'
         months_list = []
         for month in sorted(info['months'].keys()):
@@ -145,8 +181,9 @@ def api_report():
                 'month': month,
                 'amount': entry['amount'],
                 'min_pay': entry['min_pay'],
+                'is_overpayment': entry.get('is_overpayment', False),
             })
-        card_detail[f"{bank}|||周君明|||{label}"] = months_list
+        card_detail[f"{bank}|||{info.get('holder_name', '') or ''}|||{label}"] = months_list
 
     # Bank summary (no card number column)
     bank_summary = []
@@ -186,6 +223,7 @@ def api_history():
             'amount': row[2],
             'pay_date': row[3],
             'card_last4': row[4],
+            'holder_name': row[5] or '',
         })
 
     result = {}
@@ -218,25 +256,48 @@ def api_suggestions():
     avg_totals = [s['avg_monthly'] for s in spending if s['avg_monthly'] > 0]
     overall_avg = sum(avg_totals) / len(avg_totals) if avg_totals else 0
 
-    # Format bank suggestions with unpaid info
-    from src.db import get_connection
+    # Format bank suggestions with unpaid info (batch query instead of N+1)
+    # Batch query all unpaid bills (N+1 query fixed)
+    # Only positive amounts (overpayments/negative = 溢缴款, not owed)
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('''SELECT bank, bill_month, total_amount FROM bills
+                 WHERE paid = 0 AND total_amount IS NOT NULL AND total_amount > 0
+                 ORDER BY bank, bill_month DESC''')
+    all_unpaid = c.fetchall()
+    # Don't close here - teardown_appcontext handles it
+
+    # Group unpaid bills by bank
+    unpaid_by_bank = {}
+    for bank, bill_month, amount in all_unpaid:
+        if bank not in unpaid_by_bank:
+            unpaid_by_bank[bank] = []
+        unpaid_by_bank[bank].append({'month': bill_month, 'amount': amount})
+
+    # Also collect overpayments separately for display
+    c.execute('''SELECT bank, bill_month, total_amount FROM bills
+                 WHERE paid = 0 AND total_amount < 0
+                 ORDER BY bank, bill_month DESC''')
+    all_overpay = c.fetchall()
+    overpay_by_bank = {}
+    for bank, bill_month, amount in all_overpay:
+        if bank not in overpay_by_bank:
+            overpay_by_bank[bank] = []
+        overpay_by_bank[bank].append({'month': bill_month, 'amount': amount})
+
     bank_suggestions = []
     for s in spending:
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute('''SELECT bill_month, total_amount FROM bills
-                     WHERE bank = ? AND paid = 0 AND total_amount IS NOT NULL
-                     ORDER BY bill_month DESC''', (s['bank'],))
-        unpaid = c.fetchall()
-        conn.close()
-
+        bank_unpaid = unpaid_by_bank.get(s['bank'], [])
+        bank_overpay = overpay_by_bank.get(s['bank'], [])
+        # Combine unpaid + overpayments for display (frontend handles overpayment display)
+        combined = bank_unpaid + bank_overpay
         bank_suggestions.append({
             'bank': s['bank'],
             'avg_monthly': max(0, s['avg_monthly']),
             'paid_count': s['paid_count'],
             'total_paid': s['total_paid'],
-            'unpaid': [{'month': r[0], 'amount': r[1]} for r in unpaid],
-            'has_unpaid': len(unpaid) > 0,
+            'unpaid': combined,
+            'has_unpaid': len(bank_unpaid) > 0,
         })
 
     return jsonify({
@@ -255,35 +316,190 @@ def api_mark_paid():
     data = request.get_json()
     bank = data.get('bank')
     bill_month = data.get('bill_month')
+    bill_id = data.get('bill_id')  # optional — if omitted, marks ALL unpaid bills for this bank+month
 
     if not bank or not bill_month:
         return jsonify({'error': '缺少参数'}), 400
 
     conn = get_connection()
     c = conn.cursor()
-    c.execute('''SELECT id, total_amount FROM bills
-                 WHERE bank = ? AND bill_month = ? AND paid = 0
-                 ORDER BY bill_month DESC LIMIT 1''', (bank, bill_month))
-    row = c.fetchone()
 
-    if not row:
-        conn.close()
-        return jsonify({'error': f'未找到 {bank} {bill_month} 的未还款账单'}), 404
-
-    bill_id, amount = row
     from datetime import datetime
     pay_date = datetime.now().strftime('%Y-%m-%d %H:%M')
-    c.execute('UPDATE bills SET paid = 1, pay_date = ? WHERE id = ?', (pay_date, bill_id))
-    conn.commit()
-    conn.close()
 
+    if bill_id:
+        # Mark a specific bill
+        c.execute('''SELECT total_amount FROM bills WHERE id = ? AND paid = 0''', (bill_id,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': f'未找到 bill_id={bill_id} 的未还款账单'}), 404
+        amount = row[0]
+        c.execute('UPDATE bills SET paid = 1, pay_date = ? WHERE id = ?', (pay_date, bill_id))
+        conn.commit()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'bank': bank,
+            'bill_month': bill_month,
+            'bill_id': bill_id,
+            'amount': amount,
+            'pay_date': pay_date,
+        })
+    else:
+        # Legacy mode: mark ALL unpaid bills for this bank+month
+        c.execute('''SELECT id, total_amount FROM bills
+                     WHERE bank = ? AND bill_month = ? AND paid = 0
+                     ORDER BY id''', (bank, bill_month))
+        rows = c.fetchall()
+        if not rows:
+            conn.close()
+            return jsonify({'error': f'未找到 {bank} {bill_month} 的未还款账单'}), 404
+        total = 0
+        for bid, amt in rows:
+            c.execute('UPDATE bills SET paid = 1, pay_date = ? WHERE id = ?', (pay_date, bid))
+            total += amt
+        conn.commit()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'bank': bank,
+            'bill_month': bill_month,
+            'count': len(rows),
+            'amount': total,
+            'pay_date': pay_date,
+        })
+
+
+# ── Cards / 卡片列表 ──────────────────────────────
+
+@app.route('/api/cards')
+def api_cards():
+    """获取所有卡片列表。"""
+    rows = get_all_cards()
     return jsonify({
-        'success': True,
-        'bank': bank,
-        'bill_month': bill_month,
-        'amount': amount,
-        'pay_date': pay_date,
+        'cards': [
+            {
+                'id': r[0],
+                'bank': r[1],
+                'card_last4': r[2],
+                'holder_name': r[3] or '',
+            }
+            for r in rows
+        ]
     })
+
+
+# ── Annual Fees / 年费管理 ──────────────────────────
+
+@app.route('/api/annual_fees')
+def api_annual_fees():
+    """获取年费记录，支持按 card_id 过滤。"""
+    card_id = request.args.get('card_id', type=int)
+    rows = get_annual_fees(card_id)
+    return jsonify({
+        'fees': [
+            {
+                'id': r[0],
+                'card_id': r[1],
+                'bank': r[2],
+                'card_last4': r[3],
+                'holder_name': r[4] or '',
+                'amount': r[5],
+                'waive_condition': r[6],
+                'charge_month': r[7],
+                'charge_day': r[8],
+                'is_first_year': bool(r[9]),
+                'is_recurring': bool(r[10]),
+                'status': r[11],
+                'notes': r[12],
+                'created_at': r[13],
+                'updated_at': r[14],
+            }
+            for r in rows
+        ]
+    })
+
+
+@app.route('/api/annual_fees/upcoming')
+def api_annual_fees_upcoming():
+    """获取即将到期的年费（用于提醒）。"""
+    days = request.args.get('days', 30, type=int)
+    rows = get_upcoming_annual_fees(days)
+    return jsonify({
+        'fees': [
+            {
+                'id': r[0],
+                'card_id': r[1],
+                'bank': r[2],
+                'card_last4': r[3],
+                'holder_name': r[4] or '',
+                'amount': r[5],
+                'waive_condition': r[6],
+                'charge_month': r[7],
+                'charge_day': r[8],
+                'is_first_year': bool(r[9]),
+                'is_recurring': bool(r[10]),
+                'status': r[11],
+                'notes': r[12],
+            }
+            for r in rows
+        ]
+    })
+
+
+@app.route('/api/annual_fees', methods=['POST'])
+def api_create_annual_fee():
+    """创建年费记录。"""
+    data = request.get_json()
+    card_id = data.get('card_id')
+    amount = data.get('amount')
+    waive_condition = data.get('waive_condition')
+    charge_month = data.get('charge_month')
+    charge_day = data.get('charge_day')
+    is_first_year = data.get('is_first_year', False)
+    is_recurring = data.get('is_recurring', True)
+    notes = data.get('notes')
+    new_card = data.get('new_card')  # 新卡信息
+
+    # 校验：card_id 可以是 null（新卡时前端会设为 null），但 amount/月/日必须有
+    if amount is None or not charge_month or not charge_day:
+        return jsonify({'error': '缺少必要参数'}), 400
+
+    # 如果是新卡，先创建
+    if new_card:
+        card_id = add_new_card(new_card['bank'], new_card.get('card_last4'), new_card.get('holder_name'))
+
+    fee_id = create_annual_fee(card_id, amount, waive_condition, charge_month, charge_day,
+                               1 if is_first_year else 0, 1 if is_recurring else 0, notes)
+    return jsonify({'success': True, 'id': fee_id}), 201
+
+
+@app.route('/api/annual_fees/<int:fee_id>', methods=['PUT'])
+def api_update_annual_fee(fee_id):
+    """更新年费记录。"""
+    data = request.get_json()
+    result = update_annual_fee(fee_id,
+                               status=data.get('status'),
+                               amount=data.get('amount'),
+                               waive_condition=data.get('waive_condition'),
+                               charge_month=data.get('charge_month'),
+                               charge_day=data.get('charge_day'),
+                               is_first_year=data.get('is_first_year'),
+                               is_recurring=data.get('is_recurring'),
+                               notes=data.get('notes'))
+    if result:
+        return jsonify({'success': True})
+    return jsonify({'error': '记录不存在'}), 404
+
+
+@app.route('/api/annual_fees/<int:fee_id>', methods=['DELETE'])
+def api_delete_annual_fee(fee_id):
+    """删除年费记录。"""
+    result = delete_annual_fee(fee_id)
+    if result:
+        return jsonify({'success': True})
+    return jsonify({'error': '记录不存在'}), 404
 
 
 # ── Health check ────────────────────────────────────
@@ -312,5 +528,62 @@ def api_health():
     return jsonify({'status': 'ok', 'cards': 13, 'bills': 47})
 
 
+@app.route('/api/health/blood-pressure')
+def api_blood_pressure():
+    """获取血压记录数据（从 markdown 文件读取）。"""
+    try:
+        import re
+        from pathlib import Path
+
+        health_file = Path.home() / 'projects' / 'health' / 'blood_pressure.md'
+        if not health_file.exists():
+            return jsonify([])
+
+        # Cache file content to avoid repeated reads
+        content = health_file.read_text(encoding='utf-8')
+        records = []
+        
+        # Parse markdown table rows (skip header and separator lines)
+        for line in content.split('\n'):
+            if '|' not in line or line.strip().startswith('---') or line.startswith('| 日期'):
+                continue
+            
+            parts = [p.strip() for p in line.split('|')]
+            parts = [p for p in parts if p]  # remove empty strings
+            
+            if len(parts) >= 5:
+                try:
+                    # parts[2] is like "123/87" (systolic/diastolic combined)
+                    bp = parts[2].split('/')
+                    systolic = int(bp[0]) if len(bp) > 0 and bp[0].isdigit() else None
+                    diastolic = int(bp[1]) if len(bp) > 1 and bp[1].isdigit() else None
+                    pulse = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
+                    status = parts[4] if len(parts) > 4 else ''
+                    
+                    # Skip separator rows (e.g. '------') — date strings like '2026-05-09' also contain '-'
+                    if all(c == '-' for c in parts[0]) and len(parts[0]) > 1:
+                        continue
+                    
+                    records.append({
+                        'date': parts[0],
+                        'period': parts[1],
+                        'systolic': systolic,
+                        'diastolic': diastolic,
+                        'pulse': pulse,
+                        'status': status
+                    })
+                except (ValueError, IndexError):
+                    continue
+        
+        # Sort by date, then period ('早' before '晚')
+        records.sort(key=lambda r: (r['date'], 0 if r['period'] == '早' else 1))
+        
+        return jsonify(records)
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # 禁用 reloader 避免 macOS SIGKILL (exit code 137)
+    app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=False)

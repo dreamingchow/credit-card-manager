@@ -37,10 +37,21 @@ class CEBParser(BillParser):
                 result['min_payment'] = min_val
 
         # 4. 到期还款日
-        m = re.search(r'到期还款日\s+Payment Due Date\s+(\d{4})/(\d{2})/(\d{2})', text)
+        # 从表格中提取两个日期，第一个是账单日，第二个是还款日
+        # 格式: 账单日期<br/>Statement Date</td>...<br/>Payment Due Date</td>...<td>2026/05/18</td><td>2026/06/06</td>
+        m = re.search(r'账单日期.*?Statement Date.*?Payment Due Date.*?(\d{4}/\d{2}/\d{2})\s+(\d{4}/\d{2}/\d{2})', text, re.S)
         if m:
-            result['due_date_full'] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-            result['due_day'] = int(m.group(3))
+            # 取第二个日期作为到期还款日
+            date_str = m.group(2)
+            result['due_date_full'] = date_str.replace('/', '-')
+            result['due_day'] = int(date_str.split('/')[2])
+        else:
+            # 备选：查找第一个日期对（账单日+还款日）
+            m2 = re.search(r'(\d{4}/\d{2}/\d{2})\s+(\d{4}/\d{2}/\d{2})', text)
+            if m2:
+                date_str = m2.group(2)
+                result['due_date_full'] = date_str.replace('/', '-')
+                result['due_day'] = int(date_str.split('/')[2])
 
         # 5. 卡号末四位
         m = re.search(r'\*{4}(\d{4})', text)

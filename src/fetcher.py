@@ -59,11 +59,17 @@ def get_bank_name(from_addr, subject):
             if pattern.lower() in from_lower or pattern.lower() in subject_lower:
                 return bank_name
 
+    # Fallback: check if subject contains any known bank name directly
+    # Handles forwarded emails where the original bank address is lost
+    for bank_name in banks:
+        if bank_name in subject:
+            return bank_name
+
     if '@' in from_addr:
-        domain = from_addr.split('@')[1]
-        return domain
+        # Fallback to "未知银行" instead of returning email domain
+        return '未知银行'
 
-
+    return None
 def clean_filename(text, max_len=60):
     text = re.sub(r'[<>:"\\|？*]', '_', text)
     return text[:max_len]
@@ -75,7 +81,7 @@ def is_bill_email(subject):
     for exclude in ['礼品', '优惠', '活动', 'promotion', 'deals', 'gift', 'reward']:
         if exclude in subjects_lower:
             return False
-    for keyword in ['账单', '对账单', 'statement', 'billing']:
+    for keyword in ['账单', '对账单', 'statement', 'billing', '消费明细', '月度账单', '电子对账单']:
         if keyword in subjects_lower:
             return True
     return False

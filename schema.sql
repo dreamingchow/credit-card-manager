@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS cards (
     card_last4 TEXT,
     due_date_full TEXT,
     card_number TEXT,
+    holder_name TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -18,7 +19,6 @@ CREATE TABLE IF NOT EXISTS bills (
     bill_month TEXT NOT NULL,
     total_amount REAL,
     min_payment REAL,
-    due_date TEXT,
     due_date_full TEXT,
     paid INTEGER DEFAULT 0,
     pay_date TEXT,

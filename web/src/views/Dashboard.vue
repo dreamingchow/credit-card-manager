@@ -49,7 +49,10 @@
               </template>
             </el-table-column>
             <el-table-column prop="amount" label="金额" width="120">
-              <template #default="{ row }">¥{{ format(row.amount) }}</template>
+              <template #default="{ row }">
+                <span v-if="row.amount < 0" style="color: #67c23a">-¥{{ format(row.amount) }} <el-tag size="small" type="success" effect="plain">溢缴款</el-tag></span>
+                <span v-else>¥{{ format(row.amount) }}</span>
+              </template>
             </el-table-column>
             <el-table-column prop="due_date_full" label="到期日" width="120">
               <template #default="{ row }">{{ row.due_date_full || '—' }}</template>

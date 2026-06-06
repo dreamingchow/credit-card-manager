@@ -21,7 +21,7 @@
       </template>
 
       <template v-if="periodType === 'quarter'">
-        <el-select v-model="quarterValue" @change="loadReport" placeholder="选择季度" style="margin-left: 16px; width: 150px">
+        <el-select v-model="quarterYear" @change="loadReport" placeholder="选择季度" style="margin-left: 16px; width: 150px">
           <el-option v-for="y in years" :key="y" :label="y + '年'" :value="y" />
         </el-select>
         <el-select v-model="quarterNum" @change="loadReport" placeholder="Q" style="margin-left: 8px; width: 100px">
@@ -91,10 +91,16 @@
         <el-table-column prop="card" label="卡号" width="100" />
         <el-table-column prop="month" label="期数" width="100" />
         <el-table-column prop="amount" label="应还金额" width="120">
-          <template #default="{ row }">¥{{ format(row.amount) }}</template>
+          <template #default="{ row }">
+            <span v-if="row.is_overpayment" style="color: #67c23a">-¥{{ format(row.amount) }} <el-tag size="small" type="success" effect="plain">溢缴款</el-tag></span>
+            <span v-else>¥{{ format(row.amount) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="min_pay" label="最低还款" width="120">
-          <template #default="{ row }">¥{{ format(row.min_pay) }}</template>
+          <template #default="{ row }">
+            <span v-if="row.is_overpayment">—</span>
+            <span v-else>¥{{ format(row.min_pay) }}</span>
+          </template>
         </el-table-column>
       </el-table>
     </el-card>
@@ -143,8 +149,8 @@ use([
 const periodType = ref('month')
 const monthValue = ref(new Date())
 const yearValue = ref(dayjs().year())
-const quarterValue = ref(dayjs().year())
-const quarterNum = ref((dayjs().month() + 1) <= 3 ? 1 : (dayjs().month() + 1) <= 6 ? 2 : (dayjs().month() + 1) <= 9 ? 3 : 4)
+const quarterYear = ref(dayjs().year())
+const quarterNum = ref(Math.ceil((dayjs().month() + 1) / 3))
 
 const years = ref([dayjs().year() - 1, dayjs().year(), dayjs().year() + 1])
 const data = ref({ bank_months: {}, bank_summary: [], total: 0, min_total: 0 })
@@ -207,23 +213,31 @@ const pieOption = computed(() => {
 
 async function loadReport() {
   let type = periodType.value
-  let value = null
+  let params = { type }
 
   if (type === 'month') {
-    value = dayjs(monthValue.value).format('YYYY-MM')
+    params.value = dayjs(monthValue.value).format('YYYY-MM')
   } else if (type === 'quarter') {
-    value = String(quarterNum.value) // API uses <=12 as quarter number
+    params.value = String(quarterYear.value)
+    params.q = quarterNum.value
   } else if (type === 'year') {
-    value = String(yearValue.value)
+    params.value = String(yearValue.value)
   }
 
-  const res = await getReport(type, value)
+  const res = await getReport(type, params.value, params.q)
   data.value = res.data
 }
 
+// watch monthValue to trigger reload when user picks a month from the picker
+// (el-date-picker @change doesn't fire for month-type panel selection)
+watch(monthValue, () => {
+  if (periodType.value === 'month') loadReport()
+})
+
 const detailRows = computed(() => {
   const rows = []
-  for (const [key, months] of Object.entries(data.value.card_detail)) {
+  const card_detail = data.value.card_detail || {}
+  for (const [key, months] of Object.entries(card_detail)) {
     const parts = key.split('|||')
     const bank = parts[0]
     const holder_name = parts[1] || ''

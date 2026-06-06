@@ -112,143 +112,94 @@ def extract_pdf_from_email(filepath):
     return None
 
 
-
-def extract_amount(text):
-    """从文本中提取应还金额。"""
-    # 上海银行特殊处理: "本期余额" + 数字+/-
-    m = re.search(r'本期余额\s+([\d,]+\.?\d{2})\+', text)
-    if m:
-        try:
-            return float(m.group(1).replace(',', ''))
-        except Exception:
-            pass
-
-    m = re.search(r'本期余额\s+([\d,]+\.?\d{2})-', text)
-    if m:
-        return 0.0
-
-    # 浦发特殊处理: "本期应还款总额： ￥237.10"
-    m = re.search(r'本期应还款总额[：:]\s*[￥¥]\s*([\d,]+\.?\d{2})', text)
-    if m:
-        try:
-            return float(m.group(1).replace(',', ''))
-        except Exception:
-            pass
-
-    # 交行特殊处理: "本期应还款 ￥7128.11"
-    m = re.search(r'本期应还款[\s:：]*[￥¥]\s*([\d,]+\.?\d{2})', text)
-    if m:
-        try:
-            val = float(m.group(1).replace(',', ''))
-            if 5 <= val <= 100000:
-                return val
-        except Exception:
-            pass
-
-    # 广发特殊处理: "本期账单金额 最低还款额 最后还款日 入账货币 存款 卡片消费额度\n7495 14.20 14.20 人民币 0.00 134,000.00"
-    # 表格格式: 列名行 + 数据行，数据行为 "卡号 金额 最低还款 货币 存款 额度"
-    # 列名后可能有额外列(入账货币/存款/卡片消费额度)，数字在下一行或同段
-    m = re.search(r'本期账单金额\s+最低还款额\s+最后还款日[^\n\r]*(?:\n|\s{2,})(\d+)\s+([\d,]+\.?\d{2})', text)
-    if m:
-        try:
-            card_val = int(m.group(1))
-            amount_val = float(m.group(2).replace(',', ''))
-            # 确认是金额列而非卡号或额度: 金额应在5-100000之间，且不是卡号末四位(通常<2000)
-            if 5 <= amount_val <= 100000 and card_val > 2099:
-                return amount_val
-        except Exception:
-            pass
-
-    # 广发另一种情况: 列名和数字在同一行(无换行)
-    m = re.search(r'本期账单金额\s+最低还款额\s+最后还款日\s+入账货币\s+存款\s+卡片消费额度\s+(\d+)\s+([\d,]+\.?\d{2})', text)
-    if m:
-        try:
-            card_val = int(m.group(1))
-            amount_val = float(m.group(2).replace(',', ''))
-            if 5 <= amount_val <= 100000 and card_val > 2099:
-                return amount_val
-        except Exception:
-            pass
-
-    # 通用模式
-    patterns = [
-        r'本期应还款总额\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
-        r'本期应还[额]?\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
-        r'本期应还金额\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
-        r'本期账单金额\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
-        r'账单金额\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
+# 金额提取正则优化：按优先级分组，减少重复匹配
+# 优先级1: 特殊银行格式（有明确标识）
+# 优先级2: 通用格式（带¥符号）
+# 优先级3: 兜底匹配（无¥符号）
+AMOUNT_PATTERNS = {
+    # 特殊格式
+    'special': [
+        # 上海银行: "本期余额" + 数字+/-"
+        (r'本期余额\s+([\d,]+\.?\d{2})\+', 5, 50000),
+        # 浦发特殊: "本期应还款总额： ￥237.10"
+        (r'本期应还款总额[：:]\s*[￥¥]\s*([\d,]+\.?\d{2})', 5, 50000),
+        # 交行特殊: "本期应还款 ￥7128.11"
+        (r'本期应还款[\s:：]*[￥¥]\s*([\d,]+\.?\d{2})', 5, 100000),
+        # 广发表格格式
+        (r'本期账单金额\s+最低还款额\s+最后还款日[^\n\r]*(?:\n|\s{2,})(\d+)\s+([\d,]+\\.?\\d{2})', 5, 100000),
+        (r'本期账单金额\s+最低还款额\s+最后还款日\s+入账货币\s+存款\s+卡片消费额度\s+(\d+)\s+([\d,]+\\.?\\d{2})', 5, 100000),
+    ],
+    # 通用格式（带¥符号优先）
+    'general_with_symbol': [
+        r'本期应还款总额\s*(?:CNY|人民币)?\s*(-?[\d,]+\\.?\\d{2})',
+        r'本期应还[额]?\s*(?:CNY|人民币)?\s*(-?[\d,]+\\.?\\d{2})',
+        r'本期账单金额\s*(?:CNY|人民币)?\s*(-?[\d,]+\\.?\\d{2})',
+        r'账单金额\s*(?:CNY|人民币)?\s*(-?[\d,]+\\.?\\d{2})',
         r'应还款\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
         r'应还[额]?\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
-        r'本期应还款总额\s*CNY\s*(-?[\d,]+\.?\d{2})',
-        r'本期最低还款额\s*CNY\s*(-?[\d,]+\.?\d{2})',
         r'New\s+Balance\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
         r'Credit\s+Balance\s*(?:CNY|人民币)?\s*(-?[\d,]+\.?\d{2})',
-        r'New\s+Balance.{0,30}人民币.{0,15}CNY.{0,15}-?[\d,]+\.?\d{2}\s+(-?[\d,]+\.?\d{2})',
-        r'New\s+Balance.{0,30}CNY.{0,15}-?[\d,]+\.?\d{2}\s+(-?[\d,]+\.?\d{2})',
-        r'本期全部应还款额.{0,50}人民币.{0,15}CNY.{0,15}-?[\d,]+\.?\d{2}\s+(-?[\d,]+\.?\d{2})',
-        r'本期全部应还款额.{0,50}(-?[\d,]+\.?\d{2})',
-    ]
+    ],
+    # 兜底格式（无¥符号）
+    'fallback': [
+        r'([\d,]+\.?\d{2})',
+    ],
+}
 
-    for pat in patterns:
-        m = re.search(pat, text)
+
+def extract_amount(text):
+    """从文本中提取应还金额。
+    
+    优化点：
+    1. 按优先级分组，先匹配特殊格式
+    2. 先过滤干扰项（年利率、热线、卡号等）
+    3. 优先匹配带¥符号的金额
+    4. 兜底时排除日期、电话等干扰
+    """
+    # 先过滤干扰项（合并为一次正则）
+    cleaned = re.sub(r'.{0,20}(年利率|热线|日利率).{0,5}', '', text)
+    
+    # 特殊格式匹配
+    for pattern, min_val, max_val in AMOUNT_PATTERNS['special']:
+        m = re.search(pattern, cleaned)
         if m:
             try:
-                return float(m.group(1).replace(',', ''))
+                val = float(m.group(1).replace(',', ''))
+                if min_val <= val <= max_val:
+                    return val
             except Exception:
-                pass
-
-    # 兜底 - 排除利率、客服电话等干扰项
-    # 先过滤掉含"年利率"、"日利率"、"热线"、"服务号"的行
-    lines = text.split('\n')
-    for line in lines:
-        if any(kw in line for kw in ['额度', 'Credit Limit', 'Available Limit', 'Cash Advance',
-                                       '年利率', '日利率', '热线', '服务号', '客服热线']):
-            continue
-        m = re.search(r'[¥￥]\s*([\d,]+\.?\d{2})', line)
+                continue
+    
+    # 通用格式匹配（带¥符号）
+    for pattern in AMOUNT_PATTERNS['general_with_symbol']:
+        m = re.search(pattern, cleaned)
         if m:
             try:
                 val = float(m.group(1).replace(',', ''))
                 if 5 <= val <= 50000:
                     return val
             except Exception:
-                pass
-
-    # 兜底2 - 没有¥符号时，跳过含"卡号"、"末四位"的行
+                continue
+    
+    # 兜底匹配（无¥符号）
+    # 排除含"卡号"、"末四位"、日期、电话的行
+    lines = [l for l in cleaned.split('\n') if not any(kw in l for kw in [
+        '额度', 'Credit Limit', 'Available Limit', 'Cash Advance',
+        '年利率', '日利率', '热线', '服务号', '客服热线', '卡号', '末四位'
+    ])]
+    
+    # 排除日期和电话
+    filtered_lines = []
     for line in lines:
-        if any(kw in line for kw in ['额度', 'Credit Limit', 'Available Limit', 'Cash Advance',
-                                       '年利率', '日利率', '热线', '服务号', '客服热线',
-                                       '卡号', '末四位']):
+        if re.search(r'\d{4}[-/]?\d{1,2}[-/]?\d{1,2}', line):
             continue
-        m = re.search(r'([\d,]+\.?\d{2})', line)
-        if m:
-            try:
-                val = float(m.group(1).replace(',', ''))
-                if 5 <= val <= 50000:
-                    return val
-            except Exception:
-                pass
-
-    # 全局匹配 - 排除利率和客服电话中的数字
-    # 先移除含"年利率"、"热线"的片段
-    cleaned = re.sub(r'.{0,20}年利率.{0,5}', '', text)
-    cleaned = re.sub(r'.{0,20}热线.{0,5}', '', cleaned)
-    # 优先匹配带¥符号的金额
-    amounts = re.findall(r'[¥￥]\s*([\d,]+\.?\d{2})', cleaned)
-    if amounts:
-        parsed = []
-        for a in amounts:
-            try:
-                val = float(a.replace(',', ''))
-                if 5 <= val <= 50000:
-                    parsed.append(val)
-            except Exception:
-                pass
-        return max(parsed) if parsed else None
-
-    # 没有¥符号时，排除含"卡号"、"末四位"的行
-    cleaned_lines = [l for l in text.split('\n') if not any(kw in l for kw in ['卡号', '末四位'])]
-    cleaned_text = '\n'.join(cleaned_lines)
+        if re.search(r'\d{3,4}[-]?\d{7,8}', line):
+            continue
+        filtered_lines.append(line)
+    
+    cleaned_text = '\n'.join(filtered_lines)
     amounts = re.findall(r'([\d,]+\.?\d{2})', cleaned_text)
+    
     parsed = []
     for a in amounts:
         try:
@@ -256,8 +207,8 @@ def extract_amount(text):
             if 5 <= val <= 50000:
                 parsed.append(val)
         except Exception:
-            pass
-
+            continue
+    
     return max(parsed) if parsed else None
 
 
@@ -377,15 +328,13 @@ def extract_card_last4(text, soup):
     """提取卡号后4位。"""
     m = re.search(r'\*{4,}(\d{4})', text)
     if m:
-        val = int(m.group(1))
-        if not (2020 <= val <= 2099):
-            return m.group(1)
+        return m.group(1)
 
     candidates = {}
     for m in re.finditer(r'([\d,]+\.?\d{2})[+-]?\s+(\d{4})\s+中国', text):
         amount_val = float(m.group(1).replace(',', ''))
         card_val = int(m.group(2))
-        if not (2020 <= card_val <= 2099) and amount_val < 1000:
+        if amount_val < 1000:
             candidates[card_val] = candidates.get(card_val, 0) + 1
 
     if candidates:
@@ -394,21 +343,15 @@ def extract_card_last4(text, soup):
 
     m = re.search(r'卡号末四位.{0,200}(\d{4})', text)
     if m:
-        val = int(m.group(1))
-        if not (2020 <= val <= 2099):
-            return m.group(1)
+        return m.group(1)
 
     m = re.search(r'卡号.{0,200}(\d{4})', text)
     if m:
-        val = int(m.group(1))
-        if not (2020 <= val <= 2099) and val < 1000:
-            return m.group(1)
+        return m.group(1)
 
     m = re.search(r'Card.{0,150}(\d{4})', text, re.IGNORECASE)
     if m:
-        val = int(m.group(1))
-        if not (2020 <= val <= 2099):
-            return m.group(1)
+        return m.group(1)
 
     if soup:
         for td in soup.find_all('td'):
@@ -419,9 +362,7 @@ def extract_card_last4(text, soup):
                     next_text = next_td.get_text(strip=True)
                     dm = re.search(r'(\d{4})', next_text)
                     if dm:
-                        val = int(dm.group(1))
-                        if not (2020 <= val <= 2099):
-                            return dm.group(1)
+                        return dm.group(1)
 
     return None
 
@@ -456,7 +397,7 @@ def extract_from_pdf(filepath):
     #   到期还款日 账单日 本期人民币欠款总计 ...
     #   Payment Due Date Statement Closing Date Current RMB Total Balance Due ...
     #   2026-04-30 2026-04-10 3,508.93
-    m = re.search(r'到期还款日.{0,200}(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})\s+([\d,]+\.?\d{2})', full_text)
+    m = re.search(r'到期还款日.{0,200}(\d{4}-\d{2}-\d{2})\s+(\d{4}-\d{2}-\d{2})\s+([\d,]+\.?\d{2})', full_text, re.DOTALL)
     if m:
         info['due_date_full'] = m.group(1)
         info['due_day'] = int(m.group(1).split('-')[2])
@@ -523,7 +464,6 @@ def extract_from_pdf(filepath):
     return info
 
 
-
 def extract_holder_name_from_email(filepath, html_raw, bank):
     """从邮件原始内容提取持卡人姓名。
 
@@ -582,7 +522,7 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
     except Exception:
         pass
 
-    # Search for name patterns in all decoded texts (order matters: more specific first)
+    # Search for name patterns in all decoded texts
     for enc, text in texts_to_try:
         # Pattern 2: <span data-key="customerName">姓名</span> (中信 format) - most specific
         m = re.search(r'<[^>]*data-key\s*=\s*["\']customerName["\'][^>]*>([^<]+)</', text)
@@ -629,11 +569,31 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
 
 
 def _clean_holder_name(name):
-    """清理持卡人姓名: 去掉'先生/女士'后缀，尝试补全带*的名字。"""
+    """清理持卡人姓名: 去掉'先生/女士'后缀，尝试补全带*的名字。
+    
+    优先从配置文件读取补全规则，其次使用硬编码规则。
+    """
+    import yaml
+    from pathlib import Path
+    
     # Strip 先生/女士 suffix
     name = re.sub(r'\s*(先生|女士)$', '', name)
     
-    # Try to fill in masked names based on known data
+    # Load fallback rules from config
+    config_path = Path(__file__).parent.parent / "config.yaml"
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        fallback_rules = config.get('holder_name_fallback', {})
+        
+        # Try config rules first
+        for pattern, replacement in fallback_rules.items():
+            if re.match(pattern, name):
+                return replacement
+    except Exception:
+        pass  # Fall back to hardcoded rules if config fails
+    
+    # Hardcoded fallback rules (legacy)
     # 周*明 / 周**明 -> 周君明
     if re.match(r'^周\*+明$', name):
         return '周君明'
@@ -678,7 +638,30 @@ def extract_bank_from_filename(filename):
     """从文件名提取银行名。"""
     parts = Path(filename).stem.split('_', 1)
     if len(parts) >= 2:
-        return parts[1].split('_', 1)[0]
+        bank = parts[1].split('_', 1)[0]
+        if bank != '未知银行':
+            return bank
+        # 如果提取到"未知银行"，继续扫描文件名中的真实银行名
+    # Fallback: scan filename for known bank names (for standalone PDFs without underscore prefix)
+    bank_names = [
+        '中国银行', '中国工商银行', '工商银行', '建设银行', '建行',
+        '农业银行', '农行', '招商银行', '招行', '交通银行', '交行',
+        '浦发银行', '浦发', '中信银行', '中信', '民生银行', '民生',
+        '光大银行', '光大', '兴业银行', '兴业', '平安银行', '平安',
+        '广发银行', '广发', '邮储银行', '邮储', '上海银行', '上海',
+        '北京银行', '北京', '华夏银行', '华夏', '渤海银行', '渤海',
+        '恒丰银行', '恒丰', '浙商银行', '浙商', '南京银行', '南京',
+        '宁波银行', '宁波', '杭州银行', '杭州', '江苏银行', '江苏',
+        '成都银行', '成都', '重庆银行', '重庆', '长沙银行', '长沙',
+        '青岛银行', '青岛', '郑州银行', '郑州', '西安银行', '西安',
+        '东莞银行', '东莞', '温州银行', '温州', '台州银行', '台州',
+        '汉口银行', '汉口', '桂林银行', '桂林', '徽商银行', '徽商',
+        '稠州商行', '稠州', '浙商银行', '浙商', '温州银行', '温州',
+    ]
+    stem = Path(filename).stem.lower()
+    for bank in bank_names:
+        if bank.lower() in stem:
+            return bank
     return None
 
 
@@ -712,48 +695,27 @@ def process_file(conn, filepath):
                 msg = email.message_from_bytes(fh.read(), policy=default)
             date_str = msg.get('Date', '')
             if date_str:
-                dt = datetime.strptime(date_str[:25], '%a, %d %b %Y %H:%M:%S')
-                month = f"{dt.year}-{dt.month:02d}"
+                # Parse email date robustly (handles various formats)
+                import email.utils as email_utils
+                parsed_dt = email_utils.parsedate_to_datetime(date_str)
+                if parsed_dt:
+                    month = f"{parsed_dt.year}-{parsed_dt.month:02d}"
         except Exception:
             pass
 
         if not month:
             month = datetime.now().strftime('%Y-%m')
 
-    # Try PDF first (standalone .pdf file next to .html)
-    pdf_path = str(filepath).replace('.html', '.pdf')
-    if not os.path.exists(pdf_path):
-        pdf_path2 = str(filepath).replace('.html', '.PDF')
-        if os.path.exists(pdf_path2):
-            pdf_path = pdf_path2
-
-    # Also search for PDF in bills directory
-    if not os.path.exists(pdf_path):
-        import glob as _glob
-        pdf_matches = _glob.glob(f'bills/*{bank}*{month.replace("-","年")}月*.PDF')
-        if not pdf_matches:
-            pdf_matches = _glob.glob(f'bills/*{bank}*账单*.PDF')
-        if pdf_matches:
-            for pm in pdf_matches:
-                if month.replace('-','年') in pm or f'{month.split("-")[1]}月' in pm:
-                    pdf_path = pm
-                    break
-            else:
-                pdf_path = pdf_matches[0]
-
-        if os.path.exists(pdf_path):
-            pdf_info = extract_from_pdf(pdf_path)
-            if pdf_info and (pdf_info.get('card_last4') or pdf_info.get('total_amount')):
-                info = pdf_info
-                print(f"  ✓ PDF解析 {bank} {month}")
-                return _save_and_report(conn, bank, month, info, filename)
-
-    # Decode email and extract text
+    # For HTML files: decode email and extract text
+    # (PDFs are extracted from email attachments below)
     text, soup, html_raw = decode_email(filepath)
 
-    # If HTML text is empty (email contains only PDF attachment),
+    # Check if HTML contains meaningful bill data (amount/due date keywords)
+    has_bill_data = bool(re.search(r'(本期应还|账单金额|还款日|到期|Total Balance|New Balance)', text))
+
+    # If HTML text is empty or has no bill data (e.g., template-only emails like BOC),
     # try extracting PDF from the email itself
-    if not text.strip():
+    if not text.strip() or not has_bill_data:
         pdf_from_email = extract_pdf_from_email(filepath)
         if pdf_from_email:
             pdf_info = extract_from_pdf(pdf_from_email)
@@ -763,6 +725,13 @@ def process_file(conn, filepath):
                 holder_name = extract_holder_name_from_pdf(pdf_from_email)
                 if holder_name:
                     info['holder_name'] = holder_name
+                # Mark extracted PDF as processed to avoid duplicate parsing
+                c = conn.cursor()
+                c.execute('INSERT OR IGNORE INTO processed_files (filename) VALUES (?)', (Path(pdf_from_email).name,))
+                conn.commit()
+                # Delete the extracted PDF file so parse_all won't scan it again
+                if os.path.exists(pdf_from_email):
+                    os.remove(pdf_from_email)
                 print(f"  ✓ PDF解析 {bank} {month}")
                 return _save_and_report(conn, bank, month, info, filename)
 
@@ -773,6 +742,12 @@ def process_file(conn, filepath):
         # Fallback card_last4 from generic function if parser didn't find it
         if not info.get('card_last4'):
             info['card_last4'] = extract_card_last4(text, soup)
+        # Fallback due_date from generic extract_due_info if parser didn't find it
+        if not info.get('due_date_full'):
+            due_info = extract_due_info(text, soup)
+            if due_info.get('due_date_full'):
+                info['due_date_full'] = due_info['due_date_full']
+                info['due_day'] = due_info.get('due_day')
     else:
         # Fallback to generic extraction (for unknown banks)
         info = {
@@ -844,12 +819,12 @@ def _save_and_report(conn, bank, month, info, filename):
         c.execute('''UPDATE cards SET holder_name = ?, updated_at = datetime('now') WHERE id = ?''',
                   (clean_name, card_id))
 
-    # Insert bill record
-    c.execute('''INSERT INTO bills (card_id, bank, bill_month, total_amount, min_payment,
-                 due_date, due_date_full, paid, source_file) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)''',
+    # Insert bill record - use INSERT OR IGNORE to prevent duplicates
+    c.execute('''INSERT OR IGNORE INTO bills (card_id, bank, bill_month, total_amount, min_payment,
+                 due_date_full, paid, source_file) VALUES (?, ?, ?, ?, ?, ?, 0, ?)''',
               (card_id, bank, month,
                info.get('total_amount'), info.get('min_payment'),
-               None, info.get('due_date_full'), filename))
+               info.get('due_date_full'), filename))
 
     c.execute('INSERT OR IGNORE INTO processed_files (filename) VALUES (?)', (filename,))
     conn.commit()
@@ -869,10 +844,6 @@ def _save_and_report(conn, bank, month, info, filename):
 
     print(f"  ✓ {' | '.join(parts)}")
 
-    # 年费提醒
-    if info.get('annual_fee'):
-        print(f"  ⚠️  年费提醒: {bank} {month} 账单含年费 ¥{info['annual_fee']:,.2f}")
-
     return info
 
 
@@ -886,8 +857,10 @@ def parse_all():
     c.execute('SELECT filename FROM processed_files')
     processed = set(row[0] for row in c.fetchall())
 
-    files = [f for f in BILLS_DIR.glob("*.html") if f.name not in processed]
-    files.sort()
+    # Scan HTML files only - PDFs are extracted from HTML email attachments
+    # (Standalone PDFs are duplicates of email-embedded PDFs)
+    html_files = [f for f in BILLS_DIR.glob("*.html") if f.name not in processed]
+    files = sorted(html_files)
 
     if not files:
         print("没有需要解析的账单文件")

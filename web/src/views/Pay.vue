@@ -13,13 +13,16 @@
         </el-table-column>
         <el-table-column prop="bill_month" label="账单月份" width="120" />
         <el-table-column prop="amount" label="金额" width="140">
-          <template #default="{ row }">¥{{ format(row.amount) }}</template>
+          <template #default="{ row }">
+            <span v-if="row.amount < 0" style="color: #67c23a">-¥{{ format(row.amount) }} <el-tag size="small" type="success" effect="plain">溢缴款</el-tag></span>
+            <span v-else>¥{{ format(row.amount) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="due_date_full" label="到期日" width="140">
           <template #default="{ row }">{{ row.due_date_full || '—' }}</template>
         </el-table-column>
         <!-- Hidden bill_month for markPaid API -->
-        <el-table-column prop="_bill_month" width="1" />
+        <el-table-column prop="bill_id" width="1" />
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="confirmPay(row)">标记已还</el-button>
@@ -38,7 +41,8 @@
         <p>银行: <strong>{{ payTarget.bank }}</strong></p>
         <p>卡号: {{ payTarget.card_last4 ? '****' + payTarget.card_last4 : '—' }}</p>
         <p>账单月份: <strong>{{ payTarget.bill_month }}</strong></p>
-        <p>金额: <strong style="color: #e53e3e">¥{{ format(payTarget.amount) }}</strong></p>
+        <p>金额: <strong v-if="payTarget.amount < 0" style="color: #67c23a">-¥{{ format(payTarget.amount) }}（溢缴款）</strong>
+          <strong v-else style="color: #e53e3e">¥{{ format(payTarget.amount) }}</strong></p>
       </div>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -79,7 +83,7 @@ async function doPay() {
   paying.value = true
 
   try {
-    await markPaid(payTarget.value.bank, payTarget.value.bill_month)
+    await markPaid(payTarget.value.bank, payTarget.value.bill_month, payTarget.value.bill_id)
     ElMessage.success('标记还款成功')
     paySuccess.value = true
     dialogVisible.value = false

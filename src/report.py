@@ -45,30 +45,18 @@ def generate_report(period_type='month', period_value=None):
 
 def format_report(data, period_type='month', period_value=None):
     """格式化为 Markdown。"""
+    from src.db import parse_period_value
+
     lines = []
 
     if period_type == 'month':
         title = f"📊 {period_value} 信用卡消费报告"
     elif period_type == 'quarter':
-        year = datetime.now().year
-        q = (datetime.now().month - 1) // 3 + 1  # default to current quarter
-        if period_value:
-            if isinstance(period_value, str) and period_value.isdigit():
-                val = int(period_value)
-                if val <= 12:
-                    q = val  # it's a quarter number
-                else:
-                    year = val  # it's a year, keep default q
-            elif isinstance(period_value, int):
-                if period_value <= 12:
-                    q = period_value
-                else:
-                    year = period_value
-            else:
-                year = int(period_value)
+        year, q = parse_period_value(period_type, period_value)
         title = f"📊 {year}年Q{q} 信用卡消费报告"
     elif period_type == 'year':
-        title = f"📊 {period_value or datetime.now().year}年 信用卡年度消费报告"
+        year, _ = parse_period_value(period_type, period_value)
+        title = f"📊 {year}年 信用卡年度消费报告"
     else:
         title = "📊 信用卡消费报告"
 
@@ -98,8 +86,13 @@ def format_report(data, period_type='month', period_value=None):
         for month in sorted(info['months'].keys()):
             entry = info['months'][month]
             amount = entry['amount']
-            min_pay = entry['min_pay'] or 0  # 0 if not parsed from bill
-            lines.append(f"| {bank} | {cards} | {month} | ¥{amount:,.2f} | ¥{min_pay:,.2f} |")
+            # Distinguish None (not parsed) from 0 (real minimum payment)
+            min_pay = entry['min_pay']
+            if min_pay is None:
+                min_pay_str = "—"
+            else:
+                min_pay_str = f"¥{min_pay:,.2f}"
+            lines.append(f"| {bank} | {cards} | {month} | ¥{amount:,.2f} | {min_pay_str} |")
 
     lines.append("")
     lines.append("## 银行汇总")
@@ -132,25 +125,11 @@ def run(period_type='month', period_value=None):
     if period_type == 'month':
         filename = f"credit_report_{period_value}.md"
     elif period_type == 'quarter':
-        year = datetime.now().year
-        q = (datetime.now().month - 1) // 3 + 1
-        if period_value:
-            if isinstance(period_value, str) and period_value.isdigit():
-                val = int(period_value)
-                if val <= 12:
-                    q = val
-                else:
-                    year = val
-            elif isinstance(period_value, int):
-                if period_value <= 12:
-                    q = period_value
-                else:
-                    year = period_value
-            else:
-                year = int(period_value)
+        year, q = parse_period_value(period_type, period_value)
         filename = f"credit_report_{year}_Q{q}.md"
     else:
-        filename = f"credit_report_{period_value}_annual.md"
+        year, _ = parse_period_value(period_type, period_value)
+        filename = f"credit_report_{year}_annual.md"
 
     filepath = reports_dir / filename
     with open(filepath, 'w', encoding='utf-8') as f:

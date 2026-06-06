@@ -30,7 +30,10 @@
           <template #default="{ row }">{{ row.card_last4 ? '****' + row.card_last4 : '—' }}</template>
         </el-table-column>
         <el-table-column prop="amount" label="金额" width="140" sortable>
-          <template #default="{ row }">¥{{ format(row.amount) }}</template>
+          <template #default="{ row }">
+            <span v-if="row.amount < 0" style="color: #67c23a">-¥{{ format(row.amount) }} <el-tag size="small" type="success" effect="plain">溢缴款</el-tag></span>
+            <span v-else>¥{{ format(row.amount) }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="days_until" label="状态" width="120">
           <template #default="{ row }">

@@ -42,7 +42,9 @@ class CMBCParser(BillParser):
                 result['min_payment'] = val
 
         # 4. 到期还款日 (YYYY/MM/DD)
-        m = re.search(r'本期最后还款日\s+Payment Due Date\s+(\d{4})/(\d{2})/(\d{2})', text)
+        # 替换 \xa0 为空格，因为 BeautifulSoup get_text 保留 &nbsp; 为 \xa0
+        cleaned = text.replace('\xa0', ' ')
+        m = re.search(r'本期最后还款日\s+Payment Due Date\s+(\d{4})/(\d{2})/(\d{2})', cleaned)
         if m:
             result['due_date_full'] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
             result['due_day'] = int(m.group(3))

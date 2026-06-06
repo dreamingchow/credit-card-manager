@@ -30,6 +30,12 @@
         <el-menu-item index="/pay">
           <span>✅ 标记还款</span>
         </el-menu-item>
+        <el-menu-item index="/health">
+          <span>🩺 健康记录</span>
+        </el-menu-item>
+        <el-menu-item index="/annual-fees">
+          <span>💰 年费管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -48,4 +54,15 @@ const route = useRoute()
 <style>
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .el-aside .el-menu { border-right: none; }
+
+/* 打印时隐藏侧边栏，只显示打印区域 */
+@media print {
+  @page { size: landscape; margin: 10mm; }
+  .el-aside { display: none !important; }
+  .el-main { padding: 0 !important; background: #fff !important; }
+  /* 隐藏侧边栏和所有非打印内容 */
+  .el-aside, .no-print, .screen-chart { display: none !important; }
+  /* 显示打印区域 */
+  #print-area { display: block !important; }
+}
 </style>

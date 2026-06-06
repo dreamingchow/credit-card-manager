@@ -5,6 +5,7 @@
     python main.py fetch              # 下载账单邮件
     python main.py parse              # 解析所有未解析的账单
     python main.py check [days]       # 检查还款日（默认5天内）
+    python main.py annual-fee [days]  # 检查年费提醒（默认30天内）
     python main.py report [month]     # 生成报表（默认本月）
     python main.py calendar [year] [month]  # 还款日历视图
     python main.py dashboard          # 总负债仪表盘
@@ -15,6 +16,7 @@
 """
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -41,6 +43,8 @@ def main():
 
     elif cmd == 'report':
         from src.report import run as report_run
+        from src.db import parse_period_value
+
         period_type = 'month'
         period_value = None
 
@@ -49,18 +53,13 @@ def main():
             idx = sys.argv.index('--quarter')
             if idx + 1 < len(sys.argv):
                 period_value = sys.argv[idx + 1]
-            else:
-                # default to current quarter
-                import datetime as dt
-                q = (dt.datetime.now().month - 1) // 3 + 1
-                period_value = str(dt.datetime.now().year)
+            # else: use default (current quarter) from parse_period_value
         elif '--year' in sys.argv:
             period_type = 'year'
             idx = sys.argv.index('--year')
             if idx + 1 < len(sys.argv):
                 period_value = sys.argv[idx + 1]
-            else:
-                period_value = str(datetime.now().year)
+            # else: use default (current year) from parse_period_value
         elif len(sys.argv) > 2:
             period_value = sys.argv[2]
 
@@ -92,6 +91,11 @@ def main():
             print("示例: python main.py pay 邮储银行 2026-04")
         else:
             mark_paid(sys.argv[2], sys.argv[3])
+
+    elif cmd == 'annual-fee':
+        from src.reminder import run_annual_fee_reminder
+        days = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+        run_annual_fee_reminder(days_before=days)
 
     elif cmd == 'run':
         print("=" * 50)

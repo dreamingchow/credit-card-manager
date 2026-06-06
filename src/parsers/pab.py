@@ -20,7 +20,7 @@ class PABParser(BillParser):
         if m:
             val = self._safe_float(m.group(1))
             if val is not None:
-                result['total_amount'] = abs(val) if val < 0 else val
+                result['total_amount'] = val  # 负数=溢缴款，保持原值
 
         # 2. 最低应还金额
         m = re.search(r'本期最低应还金额\s*[￥¥]\s*([\d,]+\.?\d{2})', text)
