@@ -569,14 +569,27 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
 
 
 def _clean_holder_name(name):
-    """清理持卡人姓名: 去掉'先生/女士'后缀，从配置文件读取补全规则。"""
+    """清理持卡人姓名: 去掉'先生/女士'后缀，优先从 .env 读取补全规则，其次从 config.yaml。"""
     import yaml
     from pathlib import Path
+    import json
+    import os
     
     # Strip 先生/女士 suffix
     name = re.sub(r'\s*(先生|女士)$', '', name)
     
-    # Load fallback rules from config
+    # 1) Try .env via environment variable (not committed to git)
+    env_rules = os.environ.get('HOLDER_NAME_FALLBACK')
+    if env_rules:
+        try:
+            rules = json.loads(env_rules)
+            for pattern, replacement in rules.items():
+                if re.match(pattern, name):
+                    return replacement
+        except Exception:
+            pass
+    
+    # 2) Fall back to config.yaml (public, no real names)
     config_path = Path(__file__).parent.parent / "config.yaml"
     try:
         with open(config_path, 'r', encoding='utf-8') as f:

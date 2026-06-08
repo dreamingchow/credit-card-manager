@@ -26,9 +26,5 @@ reminder:
 report:
   months_to_keep: 12  # 保留多少个月的账单数据
 
-# 持卡人姓名补全规则（用于处理"周*"、"石*"等隐匿姓名）
-holder_name_fallback:
-  "周*明": "周君明"
-  "周**明": "周君明"
-  "周**": "周君明"
-  "石*": "石磊"
+# 持卡人姓名补全规则（真实姓名放在 .env 的 HOLDER_NAME_FALLBACK 中，不上传 git）
+holder_name_fallback: {}  # placeholder — real rules are in .env
