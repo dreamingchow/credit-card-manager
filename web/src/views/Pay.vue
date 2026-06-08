@@ -8,6 +8,7 @@
 
       <el-table :data="unpaidBills" stripe style="width: 100%">
         <el-table-column prop="bank" label="银行" width="120" />
+        <el-table-column prop="holder_name" label="持卡人" width="100" />
         <el-table-column prop="card_last4" label="卡号" width="120">
           <template #default="{ row }">{{ row.card_last4 ? '****' + row.card_last4 : '—' }}</template>
         </el-table-column>
@@ -39,6 +40,7 @@
     <el-dialog v-model="dialogVisible" title="确认还款" width="400px">
       <div v-if="payTarget">
         <p>银行: <strong>{{ payTarget.bank }}</strong></p>
+        <p>持卡人: <strong>{{ payTarget.holder_name || '—' }}</strong></p>
         <p>卡号: {{ payTarget.card_last4 ? '****' + payTarget.card_last4 : '—' }}</p>
         <p>账单月份: <strong>{{ payTarget.bill_month }}</strong></p>
         <p>金额: <strong v-if="payTarget.amount < 0" style="color: #67c23a">-¥{{ format(payTarget.amount) }}（溢缴款）</strong>

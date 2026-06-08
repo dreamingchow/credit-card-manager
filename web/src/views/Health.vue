@@ -10,20 +10,31 @@
     </div>
 
     <!-- 天数选择器 -->
-    <div style="margin-bottom: 20px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
-      <span style="color: #666; font-size: 14px">显示范围：</span>
-      <button v-for="opt in rangeOptions" :key="opt.value"
-        @click="setRange(opt.value)"
-        :style="{ padding: '6px 16px', borderRadius: '20px', border: selectedRange === opt.value ? '2px solid #3498db' : '2px solid #ddd', background: selectedRange === opt.value ? '#3498db' : '#fff', color: selectedRange === opt.value ? '#fff' : '#666', cursor: 'pointer', fontSize: '13px', fontWeight: selectedRange === opt.value ? 'bold' : 'normal', transition: 'all 0.2s' }">
-        {{ opt.label }}
-      </button>
-      <div style="display: flex; align-items: center; gap: 4px; margin-left: 4px">
-        <input v-model="customDays" type="number" min="1" max="365" placeholder="自定义"
-          @keyup.enter="applyCustomRange"
-          style="width: 70px; padding: 5px 8px; border: 2px solid #ddd; border-radius: 20px; font-size: 13px; text-align: center; outline: none"
-          onfocus="this.style.borderColor='#3498db'"
-          onblur="this.style.borderColor='#ddd'" />
-        <span style="color: #999; font-size: 13px">天</span>
+    <div style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span style="color: #666; font-size: 14px">显示范围：</span>
+        <button v-for="opt in rangeOptions" :key="opt.value"
+          @click="setRange(opt.value)"
+          :style="{ padding: '6px 16px', borderRadius: '20px', border: selectedRange === opt.value ? '2px solid #3498db' : '2px solid #ddd', background: selectedRange === opt.value ? '#3498db' : '#fff', color: selectedRange === opt.value ? '#fff' : '#666', cursor: 'pointer', fontSize: '13px', fontWeight: selectedRange === opt.value ? 'bold' : 'normal', transition: 'all 0.2s' }">
+          {{ opt.label }}
+        </button>
+        <div style="display: flex; align-items: center; gap: 4px; margin-left: 4px">
+          <input v-model="customDays" type="number" min="1" max="365" placeholder="自定义"
+            @keyup.enter="applyCustomRange"
+            style="width: 70px; padding: 5px 8px; border: 2px solid #ddd; border-radius: 20px; font-size: 13px; text-align: center; outline: none"
+            onfocus="this.style.borderColor='#3498db'"
+            onblur="this.style.borderColor='#ddd'" />
+          <span style="color: #999; font-size: 13px">天</span>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span style="color: #666; font-size: 14px">时段筛选：</span>
+        <button v-for="opt in periodOptions" :key="opt.value"
+          @click="setPeriod(opt.value)"
+          :style="{ padding: '6px 16px', borderRadius: '20px', border: selectedPeriod === opt.value ? '2px solid #3498db' : '2px solid #ddd', background: selectedPeriod === opt.value ? '#3498db' : '#fff', color: selectedPeriod === opt.value ? '#fff' : '#666', cursor: 'pointer', fontSize: '13px', fontWeight: selectedPeriod === opt.value ? 'bold' : 'normal', transition: 'all 0.2s' }">
+          {{ opt.label }}
+        </button>
       </div>
     </div>
 
@@ -245,6 +256,7 @@ Chart.register(LinearScale, CategoryScale, LineElement, PointElement, Tooltip, L
 const bpData = ref([])
 const selectedRange = ref(7) // 默认最近7天
 const customDays = ref('') // 自定义天数输入
+const selectedPeriod = ref('all') // 新增：时段筛选，默认为全部
 const bpChartRef = ref(null)
 const hrChartRef = ref(null)
 let bpChartInstance = null
@@ -258,7 +270,13 @@ const rangeOptions = [
   { label: '全部', value: 0 }
 ]
 
-// 当前显示的数据（根据范围过滤）
+const periodOptions = [
+  { label: '全部', value: 'all' },
+  { label: '早', value: '早' },
+  { label: '晚', value: '晚' }
+]
+
+// 当前显示的数据（根据范围和时段过滤）
 const displayData = ref([])
 
 // 获取血压数据
@@ -290,17 +308,35 @@ function applyCustomRange() {
   }
 }
 
-// 过滤数据
-function getFilteredData() {
-  if (selectedRange.value === 0) return bpData.value
-  const cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - selectedRange.value)
-  return bpData.value.filter(d => new Date(d.date) >= cutoff)
+// 新增：设置时段筛选
+function setPeriod(period) {
+  selectedPeriod.value = period
+  updateCharts()
 }
 
-// 更新图表
+// 过滤数据
+function getFilteredData() {
+  let filtered = bpData.value
+  
+  // 按日期范围过滤
+  if (selectedRange.value !== 0) {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - selectedRange.value)
+    filtered = filtered.filter(d => new Date(d.date) >= cutoff)
+  }
+
+  // 按时段过滤
+  if (selectedPeriod.value !== 'all') {
+    filtered = filtered.filter(d => d.period === selectedPeriod.value)
+  }
+
+  return filtered
+}
+
+// 更新图表和统计
 function updateCharts() {
   displayData.value = getFilteredData()
+  stats.value = calcStats(displayData.value)
   nextTick(() => {
     setTimeout(() => {
       drawBpChart()
@@ -308,6 +344,7 @@ function updateCharts() {
     }, 150)
   })
 }
+
 
 // ── 绘制血压图表 ──
 function drawBpChart() {
@@ -483,9 +520,8 @@ function getStatusText(s, di) {
   return '🔴 高'
 }
 
-// 数据变化时更新图表
-watch([bpData, selectedRange], () => {
-  stats.value = calcStats(bpData.value)
+// 数据变化时更新图表和统计
+watch([bpData, selectedRange, selectedPeriod], () => {
   updateCharts()
 })
 

@@ -303,7 +303,7 @@ def get_unpaid_summary():
     count, total = c.fetchone()
 
     # By card (latest unpaid per card)
-    c.execute('''SELECT b.bank, c.card_last4, b.due_date_full, b.total_amount, b.bill_month, b.id
+    c.execute('''SELECT b.bank, c.card_last4, b.due_date_full, b.total_amount, b.bill_month, b.id, c.holder_name
                  FROM bills b LEFT JOIN cards c ON b.card_id = c.id
                  WHERE b.paid = 0 AND b.total_amount IS NOT NULL
                  ORDER BY b.due_date_full''')

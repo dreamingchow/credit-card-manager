@@ -82,7 +82,7 @@ def api_dashboard():
         'unpaid_count': summary['unpaid_count'],
         'unpaid_total': summary['unpaid_total'],
         'unpaid_cards': [
-            {'bank': r[0], 'card_last4': r[1], 'due_date_full': r[2], 'amount': r[3], 'bill_month': r[4], 'bill_id': r[5]}
+            {'bank': r[0], 'card_last4': r[1], 'due_date_full': r[2], 'amount': r[3], 'bill_month': r[4], 'bill_id': r[5], 'holder_name': r[6]}
             for r in summary['unpaid_cards']
         ],
         'monthly_trend': trend,
