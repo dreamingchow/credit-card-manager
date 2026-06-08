@@ -1,7 +1,9 @@
 # 信用卡管理系统配置（不含敏感信息）
 # 邮箱配置已移至 .env（不上传 git）
 
-# 邮件过滤
+server:
+  host: 127.0.0.1
+  port: 5001
 filters:
   subjects:
     - "电子账单"
@@ -22,5 +24,4 @@ reminder:
 report:
   months_to_keep: 12  # 保留多少个月的账单数据
 
-# 持卡人姓名补全规则（真实姓名放在 .env 的 HOLDER_NAME_FALLBACK 中，不上传 git）
-holder_name_fallback: {}  # placeholder — real rules are in .env
+

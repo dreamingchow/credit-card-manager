@@ -585,5 +585,17 @@ def api_blood_pressure():
 
 
 if __name__ == '__main__':
+    # 从 config.yaml 读取监听地址和端口
+    import yaml
+    cfg_path = Path(__file__).parent.parent / 'config.yaml'
+    try:
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
+        svr = cfg.get('server', {})
+        host = svr.get('host', '127.0.0.1')
+        port = svr.get('port', 5001)
+    except Exception:
+        host = '127.0.0.1'
+        port = 5001
     # 禁用 reloader 避免 macOS SIGKILL (exit code 137)
-    app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=False)
+    app.run(host=host, port=port, debug=True, use_reloader=False)

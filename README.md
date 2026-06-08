@@ -20,12 +20,32 @@ pip install -r requirements.txt
 
 ## 配置
 
-1. 编辑 `.env`，填入邮箱密码：
-   ```
+1. 编辑 `.env`（不提交到 git），填入邮箱密码和服务器信息：
+   ```env
+   # 邮箱登录
    SINA_EMAIL_PASSWORD=你的邮箱密码
+   EMAIL_IMAP_HOST=imap.example.com
+   EMAIL_IMAP_PORT=993
+   EMAIL_USERNAME=you@example.com
+   EMAIL_FOLDER=INBOX
+
+   # 持卡人姓名补全规则（JSON，key=正则 pattern, value=补全后的名字）
+   HOLDER_NAME_FALLBACK={"某*":"某君","某*某":"某君某"}
    ```
 
-2. `config.yaml` 中配置邮件过滤规则、提醒天数等（不含敏感信息）。
+2. `config.yaml` 中配置服务地址、端口、邮件过滤规则、提醒天数等（不含敏感信息，可公开提交）：
+   ```yaml
+   server:
+     host: 127.0.0.1    # 监听地址
+     port: 5001          # 监听端口
+   filters:
+     subjects: ["电子账单", "对账单", ...]
+     exclude_subjects: ["礼品", "优惠", ...]
+   reminder:
+     days_before: [1, 0]
+   report:
+     months_to_keep: 12
+   ```
 
 ## 使用
 
@@ -48,7 +68,7 @@ python main.py run                # 完整流程：fetch + parse + check
 
 ```bash
 cd ~/projects/credit_card_manager && python3 api/app.py
-# 访问 http://localhost:5000
+# 访问 http://127.0.0.1:5001（端口可在 config.yaml 的 server.port 修改）
 ```
 
 Flask 同时提供 API（`/api/*`）和 Vue SPA 静态文件。
@@ -86,6 +106,8 @@ api/app.py           # Flask API + SPA 服务
 web/                 # Vue 3 + Element Plus 前端
 db/cards.db          # SQLite 数据库
 bills/               # 原始账单 HTML/PDF 文件
+.env                 # 敏感配置（不上传 git）
+config.yaml          # 公开配置（上传 git）
 ```
 
 ## 数据库

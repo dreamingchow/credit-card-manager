@@ -573,34 +573,30 @@ def _clean_holder_name(name):
     import yaml
     from pathlib import Path
     import json
-    import os
     
     # Strip 先生/女士 suffix
     name = re.sub(r'\s*(先生|女士)$', '', name)
     
-    # 1) Try .env via environment variable (not committed to git)
-    env_rules = os.environ.get('HOLDER_NAME_FALLBACK')
-    if env_rules:
+    # Helper: escape * in patterns since config/env stores unescaped asterisks
+    def _match(pattern, name):
+        escaped = pattern.replace('*', r'\*')
+        return re.match(escaped, name)
+    
+    # 1) Try .env directly (not committed to git)
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
         try:
-            rules = json.loads(env_rules)
-            for pattern, replacement in rules.items():
-                if re.match(pattern, name):
-                    return replacement
+            with open(env_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('HOLDER_NAME_FALLBACK='):
+                        env_rules = line.split('=', 1)[1]
+                        rules = json.loads(env_rules)
+                        for pattern, replacement in rules.items():
+                            if _match(pattern, name):
+                                return replacement
         except Exception:
             pass
-    
-    # 2) Fall back to config.yaml (public, no real names)
-    config_path = Path(__file__).parent.parent / "config.yaml"
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        fallback_rules = config.get('holder_name_fallback', {})
-        
-        for pattern, replacement in fallback_rules.items():
-            if re.match(pattern, name):
-                return replacement
-    except Exception:
-        pass
     
     return name
 
