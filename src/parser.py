@@ -535,7 +535,7 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
         m = re.search(r'尊敬的\s*<[^>]*>([^<]+)</', text)
         if m:
             raw_name = re.sub(r'<[^>]+>', '', m.group(1)).strip()
-            # Handle "姓名先生/女士" without space (e.g., 周君明先生)
+            # Handle "姓名先生/女士" without space (e.g., 某某某先生)
             m2 = re.match(r'([\u4e00-\u9fff]{2,6})(先生|女士)', raw_name)
             if m2:
                 name = m2.group(1) + ' ' + m2.group(2)
@@ -569,10 +569,7 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
 
 
 def _clean_holder_name(name):
-    """清理持卡人姓名: 去掉'先生/女士'后缀，尝试补全带*的名字。
-    
-    优先从配置文件读取补全规则，其次使用硬编码规则。
-    """
+    """清理持卡人姓名: 去掉'先生/女士'后缀，从配置文件读取补全规则。"""
     import yaml
     from pathlib import Path
     
@@ -586,23 +583,11 @@ def _clean_holder_name(name):
             config = yaml.safe_load(f)
         fallback_rules = config.get('holder_name_fallback', {})
         
-        # Try config rules first
         for pattern, replacement in fallback_rules.items():
             if re.match(pattern, name):
                 return replacement
     except Exception:
-        pass  # Fall back to hardcoded rules if config fails
-    
-    # Hardcoded fallback rules (legacy)
-    # 周*明 / 周**明 -> 周君明
-    if re.match(r'^周\*+明$', name):
-        return '周君明'
-    # 石* -> 石磊
-    if re.match(r'^石\*+$', name):
-        return '石磊'
-    # 周** (浦发卡) -> 周君明 (全局数据推断)
-    if re.match(r'^周\*\*+$', name):
-        return '周君明'
+        pass
     
     return name
 
@@ -619,7 +604,7 @@ def extract_holder_name_from_pdf(filepath):
                 if not text:
                     continue
 
-                # Pattern: "尊敬的周君明 先生" (浦发 PDF format)
+                # Pattern: "尊敬的某某某 先生" (浦发 PDF format)
                 m = re.search(r'尊敬的\s*([\u4e00-\u9fff]{2,6})\s*(先生|女士)', text)
                 if m:
                     return _clean_holder_name(m.group(1) + ' ' + m.group(2))
