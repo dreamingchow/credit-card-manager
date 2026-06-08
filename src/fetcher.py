@@ -87,15 +87,41 @@ def is_bill_email(subject):
     return False
 
 
-def download_emails(since_date=None):
+def _load_env_email(key, default=None):
+    """从 .env 读取邮箱配置项，取不到则从 config.yaml 读取。"""
+    env_path = BASE_DIR / ".env"
+    if env_path.exists():
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith(f'{key}='):
+                    return line.split('=', 1)[1].strip('"')
+    # fall back to config.yaml (public, no sensitive data)
     config = load_config()
-    email_cfg = config['email']
+    email_cfg = config.get('email', {})
+    mapping = {
+        'EMAIL_IMAP_HOST': 'imap_host',
+        'EMAIL_IMAP_PORT': 'imap_port',
+        'EMAIL_USERNAME': 'username',
+        'EMAIL_FOLDER': 'folder',
+    }
+    if key in mapping:
+        val = email_cfg.get(mapping[key])
+        if val is not None:
+            return str(val)
+    return default
+
+def download_emails(since_date=None):
+    host = _load_env_email('EMAIL_IMAP_HOST', 'imap.sina.com')
+    port = int(_load_env_email('EMAIL_IMAP_PORT', '993'))
+    username = _load_env_email('EMAIL_USERNAME', 'dreamingchow@sina.com')
+    folder = _load_env_email('EMAIL_FOLDER', 'INBOX')
     password = load_email_password()
 
-    print(f"📧 连接邮箱 {email_cfg['username']}...")
-    mail = imaplib.IMAP4_SSL(email_cfg['imap_host'], email_cfg['imap_port'])
-    mail.login(email_cfg['username'], password)
-    mail.select(email_cfg['folder'])
+    print(f"📧 连接邮箱 {username}...")
+    mail = imaplib.IMAP4_SSL(host, port)
+    mail.login(username, password)
+    mail.select(folder)
 
     if since_date:
         search_date = datetime.strptime(since_date, '%Y-%m-%d').strftime('%d-%b-%Y')

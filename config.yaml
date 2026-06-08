@@ -1,9 +1,5 @@
 # 信用卡管理系统配置（不含敏感信息）
-email:
-  imap_host: imap.sina.com
-  imap_port: 993
-  username: dreamingchow@sina.com
-  folder: INBOX
+# 邮箱配置已移至 .env（不上传 git）
 
 # 邮件过滤
 filters:
