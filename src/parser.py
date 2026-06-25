@@ -565,6 +565,20 @@ def extract_holder_name_from_email(filepath, html_raw, bank):
             if name and len(name) >= 2:
                 return _clean_holder_name(name)
 
+        # Pattern 7: "XXX 先生/女士" without 尊敬的 prefix (e.g., 光大银行: "周君明 &nbsp;先生")
+        m = re.search(r'([\u4e00-\u9fff]{2,6})\s*&nbsp;\s*(先生|女士)', text)
+        if m:
+            name = m.group(1).strip() + ' ' + m.group(2)
+            if name and len(name) >= 3:
+                return _clean_holder_name(name)
+
+        # Pattern 8: "XXX先生/女士" without 尊敬的 prefix, no space (e.g., "周君明先生")
+        m = re.search(r'([\u4e00-\u9fff]{2,6})(先生|女士)', text)
+        if m:
+            name = m.group(1).strip() + ' ' + m.group(2)
+            if name and len(name) >= 3:
+                return _clean_holder_name(name)
+
     return None
 
 
@@ -622,6 +636,11 @@ def extract_holder_name_from_pdf(filepath):
                 m = re.search(r'尊敬的\s*([\u4e00-\u9fff]{2,6})', text)
                 if m:
                     return _clean_holder_name(m.group(1))
+
+                # Pattern: "XXX 先生/女士" without 尊敬的 prefix
+                m = re.search(r'([\u4e00-\u9fff]{2,6})\s*(先生|女士)', text)
+                if m:
+                    return _clean_holder_name(m.group(1) + ' ' + m.group(2))
     except Exception:
         pass
 
@@ -768,50 +787,36 @@ def _save_and_report(conn, bank, month, info, filename):
     """保存解析结果到数据库并输出。"""
     c = conn.cursor()
 
-    # Upsert card info
+    # Find or create card - 只插入，不更新
     card_id = None
-    if info.get('card_last4'):
-        c.execute('SELECT id FROM cards WHERE card_last4 = ?', (info['card_last4'],))
+    holder_name = info.get('holder_name')
+    card_last4 = info.get('card_last4')
+    
+    # 匹配逻辑：
+    # 1. bank + holder_name + card_last4 (完整匹配)
+    # 2. bank + holder_name (卡号为空时用)
+    # 以上都匹配不上 → 新建卡片
+    
+    if holder_name and card_last4:
+        c.execute('SELECT id FROM cards WHERE bank = ? AND holder_name = ? AND card_last4 = ?',
+                  (bank, holder_name, card_last4))
         row = c.fetchone()
         if row:
             card_id = row[0]
-
-    if card_id is None:
-        c.execute('SELECT id FROM cards WHERE bank = ?', (bank,))
+    
+    if card_id is None and holder_name:
+        c.execute('SELECT id FROM cards WHERE bank = ? AND holder_name = ?',
+                  (bank, holder_name))
         row = c.fetchone()
         if row:
             card_id = row[0]
-
+    
+    # 匹配不上就新建
     if card_id is None:
-        c.execute('''INSERT INTO cards (bank, card_last4, due_date_full, card_number)
+        c.execute('''INSERT INTO cards (bank, card_last4, due_date_full, holder_name)
                      VALUES (?, ?, ?, ?)''',
-                  (bank, info.get('card_last4'), info.get('due_date_full'), info.get('card_number')))
+                  (bank, card_last4, info.get('due_date_full'), holder_name))
         card_id = c.lastrowid
-
-    updates = []
-    params = []
-    if info.get('card_last4'):
-        c.execute('SELECT card_last4 FROM cards WHERE id = ?', (card_id,))
-        existing = c.fetchone()
-        if not existing or not existing[0]:
-            updates.append('card_last4 = ?')
-            params.append(info['card_last4'])
-    if info.get('due_date_full'):
-        c.execute('SELECT due_date_full FROM cards WHERE id = ?', (card_id,))
-        existing = c.fetchone()
-        if not existing or not existing[0]:
-            updates.append('due_date_full = ?')
-            params.append(info['due_date_full'])
-
-    if updates:
-        params.extend([card_id])
-        c.execute(f"UPDATE cards SET {', '.join(updates)}, updated_at = datetime('now') WHERE id = ?", params)
-
-    # Also update holder_name if extracted
-    if info.get('holder_name'):
-        clean_name = _clean_holder_name(info['holder_name'])
-        c.execute('''UPDATE cards SET holder_name = ?, updated_at = datetime('now') WHERE id = ?''',
-                  (clean_name, card_id))
 
     # Insert bill record - use INSERT OR IGNORE to prevent duplicates
     c.execute('''INSERT OR IGNORE INTO bills (card_id, bank, bill_month, total_amount, min_payment,

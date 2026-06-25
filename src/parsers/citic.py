@@ -35,9 +35,18 @@ class CITICParser(BillParser):
             result['due_date_full'] = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
             result['due_day'] = int(m.group(3))
 
-        # 4. 卡号末四位
-        m = re.search(r'\*{4}(\d{4})', text)
+        # 4. 卡号末四位 - 优先从data-key提取，再正则匹配
+        # 尝试从 data-key="accountChange.cardNo" 提取
+        m = re.search(r'data-key[^>]*cardNo[^>]*>(.*?)<', text, re.DOTALL)
         if m:
-            result['card_last4'] = m.group(1)
+            card_text = re.sub(r'\s+', '', m.group(1))
+            m2 = re.search(r'(\d{4})$', card_text)
+            if m2:
+                result['card_last4'] = m2.group(1)
+        else:
+            # 兜底：匹配 ****8292 或 ****-8292 格式
+            m = re.search(r'\*{4}[\s-]*(\d{4})\s', text)
+            if m:
+                result['card_last4'] = m.group(1)
 
         return result

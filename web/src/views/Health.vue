@@ -9,6 +9,26 @@
       </button>
     </div>
 
+    <!-- 用户选择器 -->
+    <div style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span style="color: #666; font-size: 14px">用户选择：</span>
+        <el-select v-model="selectedUserId" @change="fetchBloodPressure"
+          style="width: 150px" placeholder="选择用户">
+          <el-option v-for="user in users" :key="user.id" :label="user.name" :value="user.id" />
+        </el-select>
+        <el-button type="primary" @click="showAddUserDialog = true" size="small">
+          ➕ 添加用户
+        </el-button>
+      </div>
+
+      <div>
+        <el-button type="success" @click="showAddRecordDialog = true" size="small">
+          ➕ 添加记录
+        </el-button>
+      </div>
+    </div>
+
     <!-- 天数选择器 -->
     <div style="margin-bottom: 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
       <div style="display: flex; gap: 8px; align-items: center;">
@@ -118,13 +138,68 @@
         <img id="print-hr-img" style="width:100%; height: 280px; object-fit: contain" />
       </div>
     </div>
+
+    <!-- 添加用户对话框 -->
+    <el-dialog v-model="showAddUserDialog" title="添加新用户" width="400px">
+      <el-form :model="newUser" label-width="80px">
+        <el-form-item label="姓名">
+          <el-input v-model="newUser.name" placeholder="输入姓名" />
+        </el-form-item>
+        <el-form-item label="手机号">
+          <el-input v-model="newUser.phone" placeholder="手机号" />
+        </el-form-item>
+        <el-form-item label="性别">
+          <el-radio-group v-model="newUser.gender">
+            <el-radio :label="0">未指定</el-radio>
+            <el-radio :label="1">男</el-radio>
+            <el-radio :label="2">女</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddUserDialog = false">取消</el-button>
+        <el-button type="primary" @click="createUser">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加记录对话框 -->
+    <el-dialog v-model="showAddRecordDialog" title="添加血压记录" width="500px">
+      <el-form :model="newRecord" label-width="80px">
+        <el-form-item label="日期">
+          <el-date-picker v-model="newRecord.date" type="date" value-format="YYYY-MM-DD" />
+        </el-form-item>
+        <el-form-item label="时段">
+          <el-radio-group v-model="newRecord.period">
+            <el-radio value="早">早</el-radio>
+            <el-radio value="晚">晚</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="收缩压">
+          <el-input v-model="newRecord.systolic" type="number" />
+        </el-form-item>
+        <el-form-item label="舒张压">
+          <el-input v-model="newRecord.diastolic" type="number" />
+        </el-form-item>
+        <el-form-item label="心率">
+          <el-input v-model="newRecord.pulse_rate" type="number" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="newRecord.notes" placeholder="如：吃药前、吃药后、停药" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddRecordDialog = false">取消</el-button>
+        <el-button type="primary" @click="createRecord">确定</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
-
 <script setup>
 import { ref, onMounted, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { LinearScale, CategoryScale, LineElement, PointElement, Tooltip, Legend, Filler } from 'chart.js'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 // ── 正常区间标注插件 ──
 const normalRangePlugin = {
@@ -257,6 +332,24 @@ const bpData = ref([])
 const selectedRange = ref(7) // 默认最近7天
 const customDays = ref('') // 自定义天数输入
 const selectedPeriod = ref('all') // 新增：时段筛选，默认为全部
+
+// 新增：用户管理
+const users = ref([])
+const selectedUserId = ref(null)
+const showAddUserDialog = ref(false)
+const showAddRecordDialog = ref(false)
+const newUser = ref({ name: '', phone: '', gender: 0 })
+const newRecord = ref({
+  date: new Date().toISOString().split('T')[0],
+  time: new Date().toTimeString().slice(0, 5).slice(0, 5),
+  period: '早',
+  systolic: '',
+  diastolic: '',
+  pulse_rate: '',
+  notes: '',
+  medication_status: ''
+})
+
 const bpChartRef = ref(null)
 const hrChartRef = ref(null)
 let bpChartInstance = null
@@ -279,16 +372,142 @@ const periodOptions = [
 // 当前显示的数据（根据范围和时段过滤）
 const displayData = ref([])
 
+// 获取用户列表
+async function fetchUsers() {
+  try {
+    const res = await fetch('/api/health/users')
+    const json = await res.json()
+    users.value = json.users || []
+    
+    // 默认选择第一个用户
+    if (users.value.length > 0 && !selectedUserId.value) {
+      selectedUserId.value = users.value[0].id
+    }
+  } catch (e) {
+    console.error('获取用户列表失败:', e)
+  }
+}
+
 // 获取血压数据
 async function fetchBloodPressure() {
   try {
-    const res = await fetch('/api/health/blood-pressure')
+    const params = new URLSearchParams()
+    if (selectedUserId.value) {
+      params.append('user_id', selectedUserId.value)
+    }
+    const res = await fetch(`/api/health/blood-pressure?${params}`)
     const json = await res.json()
     // API returns array directly, not {data: [...]}
     bpData.value = Array.isArray(json) ? json : (json.data || [])
     updateCharts()
   } catch (e) {
     console.error('获取血压数据失败:', e)
+    ElMessage.error('获取血压数据失败')
+  }
+}
+
+// 创建新用户
+async function createUser() {
+  try {
+    if (!newUser.value.name) {
+      ElMessage.warning('请输入姓名')
+      return
+    }
+    const res = await fetch('/api/health/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newUser.value)
+    })
+    const json = await res.json()
+    if (json.success) {
+      ElMessage.success('用户创建成功')
+      showAddUserDialog.value = false
+      newUser.value = { name: '', phone: '', gender: 0 }
+      await fetchUsers()
+      if (users.value.length === 1) {
+        selectedUserId.value = users.value[0].id
+      }
+    }
+  } catch (e) {
+    console.error('创建用户失败:', e)
+    ElMessage.error('创建用户失败')
+  }
+}
+
+// 创建血压记录
+async function createRecord() {
+  try {
+    if (!newRecord.value.date || !newRecord.value.systolic || !newRecord.value.diastolic) {
+      ElMessage.warning('请填写必填字段')
+      return
+    }
+    
+    // 自动判断服药状态
+    if (newRecord.value.notes.includes('吃药前')) {
+      newRecord.value.medication_status = '吃药前'
+    } else if (newRecord.value.notes.includes('吃药后')) {
+      newRecord.value.medication_status = '吃药后'
+    } else if (newRecord.value.notes.includes('停药')) {
+      newRecord.value.medication_status = '停药'
+    }
+    
+    const res = await fetch('/api/health/blood-pressure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: selectedUserId.value,
+        date: newRecord.value.date,
+        time: newRecord.value.time,
+        period: newRecord.value.period,
+        systolic: parseInt(newRecord.value.systolic),
+        diastolic: parseInt(newRecord.value.diastolic),
+        pulse_rate: parseInt(newRecord.value.pulse_rate) || null,
+        notes: newRecord.value.notes,
+        medication_status: newRecord.value.medication_status,
+      })
+    })
+    const json = await res.json()
+    if (json.success) {
+      ElMessage.success('记录添加成功')
+      showAddRecordDialog.value = false
+      // 重置表单
+      newRecord.value = {
+        date: new Date().toISOString().split('T')[0],
+        time: new Date().toTimeString().slice(0, 5).slice(0, 5),
+        period: '早',
+        systolic: '',
+        diastolic: '',
+        pulse_rate: '',
+        notes: '',
+        medication_status: ''
+      }
+      await fetchBloodPressure()
+    }
+  } catch (e) {
+    console.error('添加记录失败:', e)
+    ElMessage.error('添加记录失败')
+  }
+}
+
+// 删除记录
+async function deleteRecord(recordId, confirmMessage) {
+  try {
+    await ElMessageBox.confirm(confirmMessage || '确定删除这条记录吗？', '确认删除', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    const res = await fetch(`/api/health/blood-pressure/${recordId}`, {
+      method: 'DELETE'
+    })
+    const json = await res.json()
+    if (json.success) {
+      ElMessage.success('记录删除成功')
+      await fetchBloodPressure()
+    }
+  } catch (e) {
+    // 用户取消
   }
 }
 
@@ -329,6 +548,14 @@ function getFilteredData() {
   if (selectedPeriod.value !== 'all') {
     filtered = filtered.filter(d => d.period === selectedPeriod.value)
   }
+
+  // 按日期从左到右递增排序（旧的在左，新的在右）
+  filtered = [...filtered].sort((a, b) => {
+    const dateCompare = a.date.localeCompare(b.date)
+    if (dateCompare !== 0) return dateCompare
+    // 同日期时，"早"在前，"晚"在后
+    return a.period === '早' ? -1 : 1
+  })
 
   return filtered
 }
@@ -526,7 +753,9 @@ watch([bpData, selectedRange, selectedPeriod], () => {
 })
 
 onMounted(() => {
-  fetchBloodPressure()
+  fetchUsers().then(() => {
+    fetchBloodPressure()
+  })
 })
 
 // 打印：把图表转成图片放入打印区域

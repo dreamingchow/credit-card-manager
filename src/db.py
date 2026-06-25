@@ -265,7 +265,7 @@ def get_calendar_data(year=None, month=None):
             overdue_entries.append({
                 'bank': bank,
                 'holder_name': holder_name or '',
-                'card_last4': card_last4 or '?',
+                'card_last4': card_last4 or '',
                 'due_date': original_due,
                 'amount': amount,
                 'is_today': False,
@@ -277,7 +277,7 @@ def get_calendar_data(year=None, month=None):
             calendar_entries.append({
                 'bank': bank,
                 'holder_name': holder_name or '',
-                'card_last4': card_last4 or '?',
+                'card_last4': card_last4 or '',
                 'due_date': original_due,
                 'amount': amount,
                 'is_today': original_due == today,

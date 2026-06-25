@@ -5,10 +5,17 @@ import os
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, make_response
 from flask_cors import CORS
+import sys
+import os
 
 # Add project root to path so we can import src.db
 BASE_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(BASE_DIR))
+
+# Add health project to path
+health_path = Path(__file__).parent.parent.parent / 'health'
+if health_path.exists():
+    sys.path.insert(0, str(health_path))
 
 from src.db import (
     get_unpaid_summary,
@@ -27,6 +34,29 @@ from src.db import (
     delete_annual_fee,
     get_all_cards,
 )
+
+# Import health database functions (if available)
+HEALTH_DB_AVAILABLE = False
+_health_db_module = None
+
+try:
+    import importlib.util
+    health_db_path = '/Users/dreaming/projects/health/db.py'
+    spec = importlib.util.spec_from_file_location("health_db", health_db_path)
+    if spec and spec.loader:
+        _health_db_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_health_db_module)
+        HEALTH_DB_AVAILABLE = True
+    else:
+        print("Health DB: Failed to load module")
+except Exception as e:
+    print(f"Health DB import failed: {e}")
+
+# Helper to get health DB functions
+def _health_func(name):
+    if not _health_db_module:
+        return None
+    return getattr(_health_db_module, name, None)
 
 WEB_DIR = BASE_DIR / 'web' / 'dist'
 app = Flask(__name__, static_folder=str(WEB_DIR), static_url_path='')
@@ -525,63 +555,200 @@ def spa_fallback(response):
 
 @app.route('/api/health')
 def api_health():
-    return jsonify({'status': 'ok', 'cards': 13, 'bills': 47})
+    return jsonify({'status': 'ok', 'cards': 13, 'bills': 47, 'health_db': HEALTH_DB_AVAILABLE})
+
+
+@app.route('/api/health/users')
+def api_health_users():
+    """获取所有用户列表."""
+    if not HEALTH_DB_AVAILABLE:
+        return jsonify({'error': '健康数据库不可用'}), 500
+    try:
+        get_all_users = _health_func('get_all_users')
+        if not get_all_users:
+            return jsonify({'error': '健康数据库函数不可用'}), 500
+        users = get_all_users()
+        return jsonify({
+            'users': users,
+            'count': len(users),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/health/users', methods=['POST'])
+def api_health_create_user():
+    """创建新用户."""
+    if not HEALTH_DB_AVAILABLE:
+        return jsonify({'error': '健康数据库不可用'}), 500
+    data = request.get_json()
+    try:
+        create_user = _health_func('create_user')
+        if not create_user:
+            return jsonify({'error': '健康数据库函数不可用'}), 500
+        if not data.get('name'):
+            return jsonify({'error': '缺少用户名'}), 400
+        
+        user_id = create_user(
+            name=data['name'],
+            phone=data.get('phone'),
+            birthdate=data.get('birthdate'),
+            gender=data.get('gender', 0),
+            notes=data.get('notes'),
+        )
+        return jsonify({'success': True, 'user_id': user_id}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/health/blood-pressure')
 def api_blood_pressure():
-    """获取血压记录数据（从 markdown 文件读取）。"""
+    """获取血压记录数据（从数据库读取，支持按用户筛选）."""
+    if not HEALTH_DB_AVAILABLE:
+        return jsonify({'error': '健康数据库不可用'}), 500
     try:
-        import re
-        from pathlib import Path
-
-        health_file = Path.home() / 'projects' / 'health' / 'blood_pressure.md'
-        if not health_file.exists():
-            return jsonify([])
-
-        # Cache file content to avoid repeated reads
-        content = health_file.read_text(encoding='utf-8')
-        records = []
+        get_all_users = _health_func('get_all_users')
+        get_bp = _health_func('get_blood_pressure')
+        if not get_all_users or not get_bp:
+            return jsonify({'error': '健康数据库函数不可用'}), 500
+        # 获取查询参数
+        user_id = request.args.get('user_id', type=int)
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        limit = request.args.get('limit', 100, type=int)
         
-        # Parse markdown table rows (skip header and separator lines)
-        for line in content.split('\n'):
-            if '|' not in line or line.strip().startswith('---') or line.startswith('| 日期'):
-                continue
-            
-            parts = [p.strip() for p in line.split('|')]
-            parts = [p for p in parts if p]  # remove empty strings
-            
-            if len(parts) >= 5:
-                try:
-                    # parts[2] is like "123/87" (systolic/diastolic combined)
-                    bp = parts[2].split('/')
-                    systolic = int(bp[0]) if len(bp) > 0 and bp[0].isdigit() else None
-                    diastolic = int(bp[1]) if len(bp) > 1 and bp[1].isdigit() else None
-                    pulse = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
-                    status = parts[4] if len(parts) > 4 else ''
-                    
-                    # Skip separator rows (e.g. '------') — date strings like '2026-05-09' also contain '-'
-                    if all(c == '-' for c in parts[0]) and len(parts[0]) > 1:
-                        continue
-                    
-                    records.append({
-                        'date': parts[0],
-                        'period': parts[1],
-                        'systolic': systolic,
-                        'diastolic': diastolic,
-                        'pulse': pulse,
-                        'status': status
-                    })
-                except (ValueError, IndexError):
-                    continue
+        # 如果没有指定用户，默认使用第一个用户
+        if not user_id and HEALTH_DB_AVAILABLE:
+            users = get_all_users()
+            if users:
+                user_id = users[0]['id']
         
-        # Sort by date, then period ('早' before '晚')
-        records.sort(key=lambda r: (r['date'], 0 if r['period'] == '早' else 1))
+        records = get_bp(
+            user_id=user_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
         
-        return jsonify(records)
+        # 转换为前端兼容格式
+        result = []
+        for r in records:
+            result.append({
+                'id': r['id'],
+                'user_id': r['user_id'],
+                'user_name': r['user_name'],
+                'date': r['date'],
+                'time': r['time'],
+                'period': r['period'],
+                'systolic': r['systolic'],
+                'diastolic': r['diastolic'],
+                'pulse': r['pulse_rate'],
+                'status': r.get('medication_status') or r.get('notes', ''),
+            })
+        
+        return jsonify(result)
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
+@app.route('/api/health/blood-pressure', methods=['POST'])
+def api_blood_pressure_create():
+    """创建血压记录."""
+    if not HEALTH_DB_AVAILABLE:
+        return jsonify({'error': '健康数据库不可用'}), 500
+    data = request.get_json()
+    try:
+        create_bp = _health_func('create_blood_pressure')
+        if not create_bp:
+            return jsonify({'error': '健康数据库函数不可用'}), 500
+        required = ['user_id', 'date', 'period', 'systolic', 'diastolic']
+        for field in required:
+            if field not in data:
+                return jsonify({'error': f'缺少必要字段: {field}'}), 400
+        
+        record_id = create_bp(
+            user_id=data['user_id'],
+            date=data['date'],
+            time=data.get('time'),
+            period=data['period'],
+            systolic=data['systolic'],
+            diastolic=data['diastolic'],
+            pulse_rate=data.get('pulse_rate'),
+            notes=data.get('notes'),
+            medication_status=data.get('medication_status'),
+        )
+        
+        return jsonify({'success': True, 'record_id': record_id}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/health/blood-pressure/<int:record_id>', methods=['DELETE'])
+def api_blood_pressure_delete(record_id):
+    """删除血压记录."""
+    if not HEALTH_DB_AVAILABLE:
+        return jsonify({'error': '健康数据库不可用'}), 500
+    try:
+        delete_bp = _health_func('delete_blood_pressure')
+        if delete_bp:
+            delete_bp(record_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/health/blood-pressure/summary')
+def api_blood_pressure_summary():
+    """获取血压统计摘要."""
+    if not HEALTH_DB_AVAILABLE:
+        return jsonify({'error': '健康数据库不可用'}), 500
+    try:
+        get_summary = _health_func('get_blood_pressure_summary')
+        if not get_summary:
+            return jsonify({'error': '健康数据库函数不可用'}), 500
+        user_id = request.args.get('user_id', type=int)
+        if not user_id:
+            return jsonify({'error': '缺少 user_id'}), 400
+        
+        summary = get_summary(user_id)
+        
+        # 计算百分比
+        if summary['total_records'] > 0:
+            summary['high_bp_rate'] = round(
+                summary['high_bp_count'] / summary['total_records'] * 100, 1
+            )
+            summary['low_bp_rate'] = round(
+                summary['low_bp_count'] / summary['total_records'] * 100, 1
+            )
+        
+        return jsonify({'summary': summary})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/health/blood-pressure/trend')
+def api_blood_pressure_trend():
+    """获取血压趋势数据."""
+    if not HEALTH_DB_AVAILABLE:
+        return jsonify({'error': '健康数据库不可用'}), 500
+    try:
+        get_trend = _health_func('get_blood_pressure_trend')
+        if not get_trend:
+            return jsonify({'error': '健康数据库函数不可用'}), 500
+        user_id = request.args.get('user_id', type=int)
+        if not user_id:
+            return jsonify({'error': '缺少 user_id'}), 400
+        
+        days = request.args.get('days', 30, type=int)
+        trend = get_trend(user_id, days)
+        
+        return jsonify({
+            'trend': trend,
+            'days': days,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

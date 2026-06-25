@@ -31,7 +31,7 @@ def format_dashboard():
     unpaid_sorted = sorted(summary['unpaid_cards'], key=lambda x: abs(x[3] or 0), reverse=True)
     if unpaid_sorted:
         lines.append(f"\n**Top 3 最大待还:**")
-        for bank, card_last4, due_date, amount, _ in unpaid_sorted[:3]:
+        for bank, card_last4, due_date, amount, *rest in unpaid_sorted[:3]:
             card = f"****{card_last4}" if card_last4 else "无卡号"
             due = due_date or "—"
             amt = f"¥{amount:,.2f}" if amount else "—"

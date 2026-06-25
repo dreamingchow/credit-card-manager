@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 db/cards.db
 db/*.bak.*
+db_bak/
 bills/
 reports/
 logs/
