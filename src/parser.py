@@ -165,7 +165,7 @@ def extract_amount(text):
         if m:
             try:
                 val = float(m.group(1).replace(',', ''))
-                if min_val <= val <= max_val:
+                if val is not None:
                     return val
             except Exception:
                 continue
@@ -176,7 +176,7 @@ def extract_amount(text):
         if m:
             try:
                 val = float(m.group(1).replace(',', ''))
-                if 5 <= val <= 50000:
+                if val is not None:
                     return val
             except Exception:
                 continue
@@ -204,11 +204,11 @@ def extract_amount(text):
     for a in amounts:
         try:
             val = float(a.replace(',', ''))
-            if 5 <= val <= 50000:
+            if val is not None:
                 parsed.append(val)
         except Exception:
             continue
-    
+
     return max(parsed) if parsed else None
 
 
@@ -627,6 +627,11 @@ def extract_holder_name_from_pdf(filepath):
                 if not text:
                     continue
 
+                # Pattern: "● 姓名 客服专线" (农业银行 PDF format)
+                m = re.search(r'●\s*([\u4e00-\u9fff]{2,6})\s*客服专线', text)
+                if m:
+                    return _clean_holder_name(m.group(1))
+
                 # Pattern: "尊敬的某某某 先生" (浦发 PDF format)
                 m = re.search(r'尊敬的\s*([\u4e00-\u9fff]{2,6})\s*(先生|女士)', text)
                 if m:
@@ -746,21 +751,31 @@ def process_file(conn, filepath):
                 if os.path.exists(pdf_from_email):
                     os.remove(pdf_from_email)
                 print(f"  ✓ PDF解析 {bank} {month}")
-                return _save_and_report(conn, bank, month, info, filename)
+                return _save_and_report(conn, bank, month, [info], filename)
 
     # Try bank-specific parser first
     parser = get_parser(bank)
     if parser:
-        info = parser.extract(text)
-        # Fallback card_last4 from generic function if parser didn't find it
-        if not info.get('card_last4'):
-            info['card_last4'] = extract_card_last4(text, soup)
-        # Fallback due_date from generic extract_due_info if parser didn't find it
-        if not info.get('due_date_full'):
-            due_info = extract_due_info(text, soup)
-            if due_info.get('due_date_full'):
-                info['due_date_full'] = due_info['due_date_full']
-                info['due_day'] = due_info.get('due_day')
+        # Use extract_all() if parser supports multi-card bills (e.g., CGB, ICBC)
+        extract_all = getattr(parser, 'extract_all', None)
+        if extract_all:
+            import inspect
+            sig = inspect.signature(extract_all)
+            if 'soup' in sig.parameters:
+                infos = extract_all(text, soup=soup)
+            else:
+                infos = extract_all(text)
+        else:
+            infos = [parser.extract(text)]
+        # Apply fallbacks per-card
+        for info in infos:
+            if not info.get('card_last4'):
+                info['card_last4'] = extract_card_last4(text, soup)
+            if not info.get('due_date_full'):
+                due_info = extract_due_info(text, soup)
+                if due_info.get('due_date_full'):
+                    info['due_date_full'] = due_info['due_date_full']
+                    info['due_day'] = due_info.get('due_day')
     else:
         # Fallback to generic extraction (for unknown banks)
         info = {
@@ -775,75 +790,96 @@ def process_file(conn, filepath):
             info['due_day'] = due_info['due_day']
         if due_info.get('due_date_full'):
             info['due_date_full'] = due_info['due_date_full']
+        infos = [info]
 
-    # Extract holder name from HTML email
-    if not info.get('holder_name'):
-        info['holder_name'] = extract_holder_name_from_email(filepath, html_raw, bank)
+    # Extract holder name from HTML email (shared across cards)
+    if not infos:
+        print(f"  ⚠️  {bank} {month} 未解析到任何卡片数据: {filename}")
+        # 仍然标记为已处理，避免重复尝试
+        c = conn.cursor()
+        c.execute('INSERT OR IGNORE INTO processed_files (filename) VALUES (?)', (filename,))
+        conn.commit()
+        return None
+    holder_name = extract_holder_name_from_email(filepath, html_raw, bank) if not infos[0].get('holder_name') else None
+    for info in infos:
+        if not info.get('holder_name'):
+            info['holder_name'] = holder_name
 
-    return _save_and_report(conn, bank, month, info, filename)
+    return _save_and_report(conn, bank, month, infos, filename)
 
 
-def _save_and_report(conn, bank, month, info, filename):
-    """保存解析结果到数据库并输出。"""
+def _save_and_report(conn, bank, month, infos, filename):
+    """保存解析结果到数据库并输出。支持多卡（list[dict]）。"""
     c = conn.cursor()
+    results = []
 
-    # Find or create card - 只插入，不更新
-    card_id = None
-    holder_name = info.get('holder_name')
-    card_last4 = info.get('card_last4')
-    
-    # 匹配逻辑：
-    # 1. bank + holder_name + card_last4 (完整匹配)
-    # 2. bank + holder_name (卡号为空时用)
-    # 以上都匹配不上 → 新建卡片
-    
-    if holder_name and card_last4:
-        c.execute('SELECT id FROM cards WHERE bank = ? AND holder_name = ? AND card_last4 = ?',
-                  (bank, holder_name, card_last4))
-        row = c.fetchone()
-        if row:
-            card_id = row[0]
-    
-    if card_id is None and holder_name:
-        c.execute('SELECT id FROM cards WHERE bank = ? AND holder_name = ?',
-                  (bank, holder_name))
-        row = c.fetchone()
-        if row:
-            card_id = row[0]
-    
-    # 匹配不上就新建
-    if card_id is None:
-        c.execute('''INSERT INTO cards (bank, card_last4, due_date_full, holder_name)
-                     VALUES (?, ?, ?, ?)''',
-                  (bank, card_last4, info.get('due_date_full'), holder_name))
-        card_id = c.lastrowid
+    for info in infos:
+        # Find or create card - 只插入，不更新
+        card_id = None
+        holder_name = info.get('holder_name')
+        card_last4 = info.get('card_last4')
 
-    # Insert bill record - use INSERT OR IGNORE to prevent duplicates
-    c.execute('''INSERT OR IGNORE INTO bills (card_id, bank, bill_month, total_amount, min_payment,
-                 due_date_full, paid, source_file) VALUES (?, ?, ?, ?, ?, ?, 0, ?)''',
-              (card_id, bank, month,
-               info.get('total_amount'), info.get('min_payment'),
-               info.get('due_date_full'), filename))
+        # 匹配逻辑：
+        # 1. bank + holder_name + card_last4 (完整匹配)
+        # 2. bank + holder_name (卡号为空时用)
+        # 3. bank + card_last4 (持卡人名为空时用)
+        # 以上都匹配不上 → 新建卡片
+
+        if holder_name and card_last4:
+            c.execute('SELECT id FROM cards WHERE bank = ? AND holder_name = ? AND card_last4 = ?',
+                      (bank, holder_name, card_last4))
+            row = c.fetchone()
+            if row:
+                card_id = row[0]
+
+        if card_id is None and holder_name and not card_last4:
+            c.execute('SELECT id FROM cards WHERE bank = ? AND holder_name = ?',
+                      (bank, holder_name))
+            row = c.fetchone()
+            if row:
+                card_id = row[0]
+
+        if card_id is None and card_last4 and not holder_name:
+            c.execute('SELECT id FROM cards WHERE bank = ? AND card_last4 = ?',
+                      (bank, card_last4))
+            row = c.fetchone()
+            if row:
+                card_id = row[0]
+
+        # 匹配不上就新建
+        if card_id is None:
+            c.execute('''INSERT INTO cards (bank, card_last4, due_date_full, holder_name)
+                         VALUES (?, ?, ?, ?)''',
+                      (bank, card_last4, info.get('due_date_full'), holder_name))
+            card_id = c.lastrowid
+
+        # Insert bill record - use INSERT OR IGNORE to prevent duplicates
+        c.execute('''INSERT OR IGNORE INTO bills (card_id, bank, bill_month, total_amount, min_payment,
+                     due_date_full, paid, source_file) VALUES (?, ?, ?, ?, ?, ?, 0, ?)''',
+                  (card_id, bank, month,
+                   info.get('total_amount'), info.get('min_payment'),
+                   info.get('due_date_full'), filename))
+
+        # Print summary per card
+        parts = [f"{bank} {month}"]
+        if info.get('holder_name'):
+            parts.append(f"持卡人: {info['holder_name']}")
+        if info.get('card_last4'):
+            parts.append(f"****{info['card_last4']}")
+        if info.get('total_amount'):
+            parts.append(f"¥{info['total_amount']:,.2f}")
+        if info.get('min_payment'):
+            parts.append(f"最低¥{info['min_payment']:,.2f}")
+        if info.get('due_date_full'):
+            parts.append(f"到期{info['due_date_full']}")
+
+        print(f"  ✓ {' | '.join(parts)}")
+        results.append(info)
 
     c.execute('INSERT OR IGNORE INTO processed_files (filename) VALUES (?)', (filename,))
     conn.commit()
 
-    # Print summary
-    parts = [f"{bank} {month}"]
-    if info.get('holder_name'):
-        parts.append(f"持卡人: {info['holder_name']}")
-    if info.get('card_last4'):
-        parts.append(f"****{info['card_last4']}")
-    if info.get('total_amount'):
-        parts.append(f"¥{info['total_amount']:,.2f}")
-    if info.get('min_payment'):
-        parts.append(f"最低¥{info['min_payment']:,.2f}")
-    if info.get('due_date_full'):
-        parts.append(f"到期{info['due_date_full']}")
-
-    print(f"  ✓ {' | '.join(parts)}")
-
-    return info
+    return results[0] if results else None
 
 
 def parse_all():

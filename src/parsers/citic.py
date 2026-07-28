@@ -19,14 +19,14 @@ class CITICParser(BillParser):
         m = re.search(r'本期应还款总额\s+CNY\s+([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val is not None and 0 <= val <= 100000:
+            if val is not None:
                 result['total_amount'] = val
 
         # 2. 最低还款额 (支持空格变化)
         m = re.search(r'本期最低还款额\s+CNY\s+([\d,]+\.?\d{2})', text)
         if m:
             val = self._safe_float(m.group(1))
-            if val is not None and 0 <= val <= 50000:
+            if val is not None:
                 result['min_payment'] = val
 
         # 3. 到期还款日 (YYYY年MM月DD日)

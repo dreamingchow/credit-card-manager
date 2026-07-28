@@ -57,7 +57,7 @@ def format_calendar(year=None, month=None):
                 days_label = f" 🟢{e['days_until']}天后"
 
             card = f"****{e['card_last4']}" if e['card_last4'] else "无卡号"
-            lines.append(f"  {e['bank']} {card} — {amt}{days_label}")
+            lines.append(f"  {e['bank']}  {card} — {amt}{days_label}")
 
     # Summary
     total = sum(e['amount'] for e in entries if e['amount'])

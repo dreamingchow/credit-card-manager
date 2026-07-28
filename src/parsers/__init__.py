@@ -16,6 +16,7 @@ from .abc import ABCParser        # 农业银行
 from .pab import PABParser        # 平安银行
 from .cmbc import CMBCParser      # 民生银行
 from .bos import BOCOM_SHParser   # 上海银行
+from .icbc import ICBCParser      # 中国工商银行
 
 # 银行名 -> 解析器类映射
 PARSER_MAP = {
@@ -27,6 +28,8 @@ PARSER_MAP = {
     '建设银行': CCBParser,
     '光大银行': CEBParser,
     '中国银行': BOCParser,
+    '中国工商银行': ICBCParser,
+    '工商银行': ICBCParser,
     '中信银行': CITICParser,
     '农业银行': ABCParser,
     '平安银行': PABParser,

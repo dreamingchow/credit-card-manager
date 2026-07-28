@@ -601,36 +601,33 @@ def api_health_create_user():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/health/blood-pressure')
+@app.route('/api/health/blood-pressure', methods=['GET', 'POST'])
 def api_blood_pressure():
-    """获取血压记录数据（从数据库读取，支持按用户筛选）."""
+    """获取血压记录（GET）或创建血压记录（POST）."""
     if not HEALTH_DB_AVAILABLE:
         return jsonify({'error': '健康数据库不可用'}), 500
+    if request.method == 'POST':
+        return _api_blood_pressure_create()
+    # GET
     try:
         get_all_users = _health_func('get_all_users')
         get_bp = _health_func('get_blood_pressure')
         if not get_all_users or not get_bp:
             return jsonify({'error': '健康数据库函数不可用'}), 500
-        # 获取查询参数
         user_id = request.args.get('user_id', type=int)
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         limit = request.args.get('limit', 100, type=int)
-        
-        # 如果没有指定用户，默认使用第一个用户
         if not user_id and HEALTH_DB_AVAILABLE:
             users = get_all_users()
             if users:
                 user_id = users[0]['id']
-        
         records = get_bp(
             user_id=user_id,
             start_date=start_date,
             end_date=end_date,
             limit=limit,
         )
-        
-        # 转换为前端兼容格式
         result = []
         for r in records:
             result.append({
@@ -643,20 +640,17 @@ def api_blood_pressure():
                 'systolic': r['systolic'],
                 'diastolic': r['diastolic'],
                 'pulse': r['pulse_rate'],
+                'notes': r.get('notes'),
                 'status': r.get('medication_status') or r.get('notes', ''),
             })
-        
         return jsonify(result)
     except Exception as e:
         import traceback
         return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
 
-@app.route('/api/health/blood-pressure', methods=['POST'])
-def api_blood_pressure_create():
-    """创建血压记录."""
-    if not HEALTH_DB_AVAILABLE:
-        return jsonify({'error': '健康数据库不可用'}), 500
+def _api_blood_pressure_create():
+    """辅助函数：创建血压记录."""
     data = request.get_json()
     try:
         create_bp = _health_func('create_blood_pressure')

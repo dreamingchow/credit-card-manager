@@ -23,6 +23,14 @@ class BillParser(ABC):
         """
         ...
 
+    def extract_all(self, text: str, soup=None) -> list:
+        """从一张可能包含多卡的账单中提取所有卡片数据。
+
+        默认实现返回单卡结果（向后兼容）。
+        多卡银行（如广发）应覆盖此方法返回 list[dict]，可返回空列表。
+        """
+        return [self.extract(text)]
+
     @staticmethod
     def _safe_float(val_str: str) -> Optional[float]:
         """安全转换金额为float。"""
@@ -58,9 +66,18 @@ class BillParser(ABC):
         return None, None
 
     @staticmethod
-    def _extract_min_payment(text: str) -> Optional[float]:
-        """提取最低还款额."""
-        m = re.search(r'最低还款额\s*[￥¥]?\s*([\d,]+\.?\d{2})', text)
+    def _extract_holder_name_from_text(text: str, card_last4: str) -> Optional[str]:
+        """尝试从文本中提取持卡人姓名。"""
+        # 匹配常见模式: 尊敬的 XXX 先生/女士
+        m = re.search(r'尊敬的\s*(\S+?)\s*(?:先生|女士|小姐)', text)
         if m:
-            return BillParser._safe_float(m.group(1))
+            return m.group(1)
         return None
+
+
+class MultiCardParser(BillParser):
+    """多卡账单解析器基类（一封邮件含多张卡）的标记类。
+
+    子类应实现 extract_all() 返回多个 dict。
+    """
+    pass

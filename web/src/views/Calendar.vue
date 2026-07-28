@@ -22,7 +22,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="bank" label="银行" width="100" />
+        <el-table-column prop="bank" label="银行" width="120" />
         <el-table-column prop="holder_name" label="持卡人" width="80">
           <template #default="{ row }">{{ row.holder_name || '—' }}</template>
         </el-table-column>

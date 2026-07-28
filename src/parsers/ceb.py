@@ -29,7 +29,7 @@ class CEBParser(BillParser):
         if m:
             # group(1) = 账单金额, group(2) = 最低还款额
             val = self._safe_float(m.group(1))
-            if val is not None and 0 <= val <= 50000:
+            if val is not None:
                 result['total_amount'] = val
             # group(2) = 最低还款额
             min_val = self._safe_float(m.group(2))

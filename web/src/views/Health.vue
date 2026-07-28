@@ -74,6 +74,27 @@
       </div>
     </div>
 
+    <!-- 统计摘要 -->
+    <div v-if="stats.systolic && bpData.length > 0" style="background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px">
+      <h3 style="margin-top: 0; color: #555">📊 统计摘要</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px">
+        <div>
+          <div style="color: #7f8c8d; font-size: 14px">平均收缩压</div>
+          <div style="font-size: 24px; font-weight: bold; color: #e74c3c">{{ stats.systolic.avg }} <span style="font-size: 14px; color: #999">mmHg</span></div>
+          <div style="font-size: 12px; color: #999">范围: {{ stats.systolic.min }} - {{ stats.systolic.max }}</div>
+        </div>
+        <div>
+          <div style="color: #7f8c8d; font-size: 14px">平均舒张压</div>
+          <div style="font-size: 24px; font-weight: bold; color: #3498db">{{ stats.diastolic.avg }} <span style="font-size: 14px; color: #999">mmHg</span></div>
+          <div style="font-size: 12px; color: #999">范围: {{ stats.diastolic.min }} - {{ stats.diastolic.max }}</div>
+        </div>
+        <div>
+          <div style="color: #7f8c8d; font-size: 14px">平均心率</div>
+          <div style="font-size: 24px; font-weight: bold; color: #2ecc71">{{ stats.pulse.avg }} <span style="font-size: 14px; color: #999">次/分</span></div>
+        </div>
+      </div>
+    </div>
+
     <!-- 血压数据表格 -->
     <div v-if="bpData.length > 0" style="background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1)">
       <h3 style="margin-top: 0; color: #555">血压记录</h3>
@@ -86,6 +107,8 @@
             <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0">舒张压</th>
             <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0">心率</th>
             <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0">状态</th>
+            <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0">用药状态</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e0e0e0">备注</th>
           </tr>
         </thead>
         <tbody>
@@ -100,30 +123,15 @@
                 {{ getStatusText(item.systolic, item.diastolic) }}
               </span>
             </td>
+            <td style="padding: 10px; text-align: center; border-bottom: 1px solid #e0e0e0">
+              <span :style="{ color: item.status === '停药' ? '#e67e22' : '#27ae60', fontWeight: 'bold' }">
+                {{ item.status || '' }}
+              </span>
+            </td>
+            <td style="padding: 10px; border-bottom: 1px solid #e0e0e0; color: #666">{{ item.notes || '' }}</td>
           </tr>
         </tbody>
       </table>
-
-      <!-- 统计摘要 -->
-      <div v-if="stats.systolic" style="margin-top: 20px; padding: 15px; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #3498db">
-        <h4 style="margin-top: 0; color: #2c3e50">📊 统计摘要</h4>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px">
-          <div>
-            <div style="color: #7f8c8d; font-size: 14px">平均收缩压</div>
-            <div style="font-size: 24px; font-weight: bold; color: #e74c3c">{{ stats.systolic.avg }} <span style="font-size: 14px; color: #999">mmHg</span></div>
-            <div style="font-size: 12px; color: #999">范围: {{ stats.systolic.min }} - {{ stats.systolic.max }}</div>
-          </div>
-          <div>
-            <div style="color: #7f8c8d; font-size: 14px">平均舒张压</div>
-            <div style="font-size: 24px; font-weight: bold; color: #3498db">{{ stats.diastolic.avg }} <span style="font-size: 14px; color: #999">mmHg</span></div>
-            <div style="font-size: 12px; color: #999">范围: {{ stats.diastolic.min }} - {{ stats.diastolic.max }}</div>
-          </div>
-          <div>
-            <div style="color: #7f8c8d; font-size: 14px">平均心率</div>
-            <div style="font-size: 24px; font-weight: bold; color: #2ecc71">{{ stats.pulse.avg }} <span style="font-size: 14px; color: #999">次/分</span></div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- 打印专用区域（屏幕隐藏，打印时显示） -->

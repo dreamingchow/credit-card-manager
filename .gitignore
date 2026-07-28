@@ -8,3 +8,5 @@ reports/
 logs/
 .env
 .DS_Store
+app.db
+credit_cards.db
