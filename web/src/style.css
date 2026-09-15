@@ -166,6 +166,13 @@ code {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+
+  @media (max-width: 768px) {
+    width: 100%;
+    border-inline: none;
+    padding: 0 8px;
+    box-sizing: border-box;
+  }
 }
 
 #center {
@@ -292,5 +299,21 @@ code {
   &::after {
     right: 0;
     border-right-color: var(--border);
+  }
+}
+
+
+/* 手机端表格优化 */
+@media (max-width: 768px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  th, td {
+    padding: 8px 10px !important;
+    font-size: 14px;
   }
 }

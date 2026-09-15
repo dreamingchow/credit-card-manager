@@ -1,27 +1,20 @@
-# 信用卡管理系统配置（不含敏感信息）
-# 邮箱配置已移至 .env（不上传 git）
-
 server:
-  host: 127.0.0.1
+  host: 0.0.0.0
   port: 5001
 filters:
   subjects:
-    - "电子账单"
-    - "对账单"
-    - "信用卡账单"
+  - 电子账单
+  - 对账单
+  - 信用卡账单
   exclude_subjects:
-    - "礼品"
-    - "优惠"
-    - "活动"
-    - "Promotion"
-    - "Deals"
-
-# 还款提醒
+  - 礼品
+  - 优惠
+  - 活动
+  - Promotion
+  - Deals
 reminder:
-  days_before: [1, 0]  # 提前几天提醒（前一天 + 当天）
-
-# 分析报表
+  days_before:
+  - 1
+  - 0
 report:
-  months_to_keep: 12  # 保留多少个月的账单数据
-
-
+  months_to_keep: 12
